@@ -4,27 +4,21 @@ const mongoose = require("mongoose");
 require("dotenv").config();
 const connectDB = require("./config/db");
 connectDB()
-// =====================================================
-// MODELS
-// =====================================================
+
 
 const Report = require("./models/report.model");
 const User = require("./models/user.model");
 const Assignment = require("./models/assignment.model");
 const Verification = require("./models/verification.model");
 
-// =====================================================
-// APP SETUP
-// =====================================================
+
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-// =====================================================
-// MONGODB CONNECTION
-// =====================================================
+
 
 mongoose
   .connect(process.env.MONGO_URI)
@@ -35,9 +29,7 @@ mongoose
     console.error("MongoDB connection failed:", error.message);
   });
 
-// =====================================================
-// HEALTH CHECK
-// =====================================================
+
 
 app.get("/", (req, res) => {
   res.json({
@@ -46,30 +38,9 @@ app.get("/", (req, res) => {
   });
 });
 
-// =====================================================
-// CITIZEN APIs
-// =====================================================
 
-/*
-  1. CREATE ROAD DAMAGE REPORT
 
-  POST /api/reports
 
-  Expected body:
-
-  {
-    "userId": "USER_MONGODB_ID",
-    "imageUrl": "https://example.com/image.jpg",
-    "latitude": 28.6139,
-    "longitude": 77.2090,
-    "address": "Near college gate",
-    "damageType": "pothole",
-    "severity": "high",
-    "confidence": 0.93,
-    "priorityScore": 90,
-    "description": "Large pothole on road"
-  }
-*/
 
 app.post("/reports", async (req, res) => {
   try {
@@ -86,7 +57,7 @@ app.post("/reports", async (req, res) => {
       description
     } = req.body;
 
-    // Required fields
+ 
     if (
       !userId ||
       !imageUrl ||
@@ -100,7 +71,7 @@ app.post("/reports", async (req, res) => {
       });
     }
 
-    // Check whether user exists
+
     const user = await User.findById(userId);
 
     if (!user) {
@@ -110,7 +81,7 @@ app.post("/reports", async (req, res) => {
       });
     }
 
-    // Create report
+
     const report = await Report.create({
       userId,
 
@@ -126,8 +97,7 @@ app.post("/reports", async (req, res) => {
 
       address: address || "",
 
-      // Temporary defaults.
-      // Later FastAPI/YOLO will provide these.
+     
       damageType: damageType || "other",
       severity: severity || "low",
 
@@ -164,13 +134,6 @@ app.post("/reports", async (req, res) => {
 });
 
 
-// =====================================================
-// 2. GET CITIZEN'S REPORTS
-// =====================================================
-
-/*
-  GET /api/reports/my?userId=USER_ID
-*/
 
 app.get("/reports/my", async (req, res) => {
   try {
@@ -206,13 +169,6 @@ app.get("/reports/my", async (req, res) => {
 });
 
 
-// =====================================================
-// 3. GET ONE REPORT
-// =====================================================
-
-/*
-  GET /api/reports/:id
-*/
 
 app.get("/reports/:id", async (req, res) => {
   try {
@@ -243,17 +199,6 @@ app.get("/reports/:id", async (req, res) => {
 });
 
 
-// =====================================================
-// ADMIN APIs
-// =====================================================
-
-// =====================================================
-// 4. GET ALL REPORTS
-// =====================================================
-
-/*
-  GET /api/admin/reports
-*/
 
 app.get("/admin/reports", async (req, res) => {
   try {
@@ -279,13 +224,7 @@ app.get("/admin/reports", async (req, res) => {
 });
 
 
-// =====================================================
-// 5. ADMIN DASHBOARD STATISTICS
-// =====================================================
 
-/*
-  GET /api/admin/dashboard
-*/
 
 app.get("/admin/dashboard", async (req, res) => {
   try {
@@ -354,13 +293,6 @@ app.get("/admin/dashboard", async (req, res) => {
 });
 
 
-// =====================================================
-// 6. HIGH PRIORITY REPORTS
-// =====================================================
-
-/*
-  GET /api/admin/reports/priority
-*/
 
 app.get("/admin/reports/priority", async (req, res) => {
   try {
@@ -393,19 +325,6 @@ app.get("/admin/reports/priority", async (req, res) => {
 });
 
 
-// =====================================================
-// 7. UPDATE REPORT STATUS
-// =====================================================
-
-/*
-  PUT /api/admin/reports/:id/status
-
-  Body:
-
-  {
-    "status": "in_progress"
-  }
-*/
 
 app.put("/admin/reports/:id/status", async (req, res) => {
   try {
@@ -464,20 +383,7 @@ app.put("/admin/reports/:id/status", async (req, res) => {
 });
 
 
-// =====================================================
-// 8. ASSIGN REPAIR WORKER
-// =====================================================
 
-/*
-  PUT /api/admin/reports/:id/assign
-
-  Body:
-
-  {
-    "assignedTo": "WORKER_USER_ID",
-    "assignedBy": "ADMIN_USER_ID"
-  }
-*/
 
 app.put("/admin/reports/:id/assign", async (req, res) => {
   try {
@@ -505,7 +411,7 @@ app.put("/admin/reports/:id/assign", async (req, res) => {
       });
     }
 
-    // Check admin
+   
     const admin = await User.findById(assignedBy);
 
     if (!admin) {
@@ -515,7 +421,7 @@ app.put("/admin/reports/:id/assign", async (req, res) => {
       });
     }
 
-    // Check report
+  
     const report = await Report.findById(
       req.params.id
     );
@@ -527,13 +433,13 @@ app.put("/admin/reports/:id/assign", async (req, res) => {
       });
     }
 
-    // Update report
+
     report.assignedTo = assignedTo;
     report.status = "assigned";
 
     await report.save();
 
-    // Create assignment record
+
     const assignment =
       await Assignment.create({
         reportId: report._id,
@@ -561,13 +467,7 @@ app.put("/admin/reports/:id/assign", async (req, res) => {
 });
 
 
-// =====================================================
-// 9. MARK REPAIR AS IN PROGRESS
-// =====================================================
 
-/*
-  PUT /api/admin/reports/:id/in-progress
-*/
 
 app.put(
   "/admin/reports/:id/in-progress",
@@ -593,7 +493,7 @@ app.put(
         });
       }
 
-      // Update latest assignment
+
       await Assignment.findOneAndUpdate(
         {
           reportId: report._id
@@ -630,19 +530,7 @@ app.put(
 );
 
 
-// =====================================================
-// 10. MARK REPAIR COMPLETED
-// =====================================================
 
-/*
-  PUT /api/admin/reports/:id/complete
-
-  Body:
-
-  {
-    "completionImageUrl": "https://..."
-  }
-*/
 
 app.put(
   "/admin/reports/:id/complete",
@@ -720,22 +608,7 @@ app.put(
 );
 
 
-// =====================================================
-// 11. VERIFY COMPLETED REPAIR
-// =====================================================
 
-/*
-  POST /api/admin/reports/:id/verify
-
-  Body:
-
-  {
-    "verifiedBy": "ADMIN_USER_ID",
-    "imageUrl": "https://...",
-    "result": "approved",
-    "remarks": "Repair verified successfully"
-  }
-*/
 
 app.post(
   "/admin/reports/:id/verify",
@@ -784,7 +657,7 @@ app.post(
         });
       }
 
-      // Create verification record
+      
       const verification =
         await Verification.create({
           reportId: report._id,
@@ -794,7 +667,6 @@ app.post(
           remarks: remarks || ""
         });
 
-      // Update report status
       report.status =
         result === "approved"
           ? "verified"
@@ -828,18 +700,7 @@ app.post(
 );
 
 
-// =====================================================
-// AI API
-// =====================================================
 
-/*
-  12. TEMPORARY AI ANALYSIS API
-
-  POST /api/analyze
-
-  Later:
-  Node.js → FastAPI → YOLO
-*/
 
 app.post("/analyze", async (req, res) => {
 
@@ -856,22 +717,7 @@ app.post("/analyze", async (req, res) => {
       });
     }
 
-    /*
-      TEMPORARY RESPONSE
 
-      Later this will become:
-
-      Node.js
-          ↓
-      FastAPI
-          ↓
-      YOLO
-          ↓
-      damageType
-      severity
-      confidence
-      priorityScore
-    */
 
     const aiResult = {
       damageType: "pothole",
@@ -901,25 +747,7 @@ app.post("/analyze", async (req, res) => {
 });
 
 
-// =====================================================
-// AUTH APIs
-// =====================================================
 
-// =====================================================
-// 13. CITIZEN REGISTRATION
-// =====================================================
-
-/*
-  POST /api/auth/register
-
-  Body:
-
-  {
-    "name": "Pawan",
-    "email": "pawan@gmail.com",
-    "password": "123456"
-  }
-*/
 
 app.post(
   "/auth/register",
@@ -996,20 +824,8 @@ app.post(
 );
 
 
-// =====================================================
-// 14. LOGIN
-// =====================================================
 
-/*
-  POST /api/auth/login
 
-  Body:
-
-  {
-    "email": "user@gmail.com",
-    "password": "123456"
-  }
-*/
 
 app.post(
   "/auth/login",
@@ -1046,8 +862,7 @@ app.post(
         });
       }
 
-      // Temporary password comparison.
-      // Later use bcrypt.
+   
       if (user.password !== password) {
         return res.status(401).json({
           success: false,
@@ -1085,9 +900,6 @@ app.post(
 );
 
 
-// =====================================================
-// START SERVER
-// =====================================================
 
 const PORT =
   process.env.PORT || 3000;
