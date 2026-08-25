@@ -32,7 +32,7 @@ const reportSchema = new mongoose.Schema(
 
     damageType: {
       type: String,
-      enum: ["pothole", "crack", "road_surface_damage", "other"],
+      enum: ["pothole","open_manhole", "crack", "road_surface_damage", "other"],
       required: true
     },
     severity: {
