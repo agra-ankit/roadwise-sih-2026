@@ -1,32 +1,28 @@
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import "./App.css";
+import "./admin.css";
 
-import Navbar from "./components/Navbar";
-import Hero from "./components/Hero";
-import Stats from "./components/Stats";
-import HowItWorks from "./components/HowItWorks";
-import ReportForm from "./components/ReportForm";
-import CTA from "./components/CTA";
-import Footer from "./components/Footer";
-
+import CitizenHome from "./pages/citizen/Home";
+import AdminLogin from "./pages/admin/Login";
+import AdminDashboard from "./pages/admin/Dashboard";
+import AdminReports from "./pages/admin/Reports";
+import ReportDetails from "./pages/admin/ReportDetails";
+import AdminMap from "./pages/admin/Map";
 function App() {
   return (
-    <div className="app">
-      <div className="bg-glow glow-one"></div>
-      <div className="bg-glow glow-two"></div>
-      <div className="grid-bg"></div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<CitizenHome />} />
 
-      <Navbar />
+        <Route path="/admin/login" element={<AdminLogin />} />
 
-      <main>
-        <Hero />
-        <Stats />
-        <HowItWorks />
-        <ReportForm />
-        <CTA />
-      </main>
-
-      <Footer />
-    </div>
+        <Route path="/admin/dashboard" element={<AdminDashboard />} />
+        <Route path="/admin/reports" element={<AdminReports />} />
+        <Route path="/admin/reports/:id" element={<ReportDetails />} />
+        <Route path="/admin/map" element={<AdminMap />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 
