@@ -1,50 +1,76 @@
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { getReports } from "../../services/api";
 
 function Reports() {
   const navigate = useNavigate();
 
-  const reports = [
-    {
-      id: "RW-1048",
-      location: "MG Road",
-      damage: "Pothole",
-      severity: "High",
-      status: "Pending",
-      date: "25 Aug 2026",
-    },
-    {
-      id: "RW-1047",
-      location: "Civil Lines",
-      damage: "Road Crack",
-      severity: "Medium",
-      status: "Assigned",
-      date: "25 Aug 2026",
-    },
-    {
-      id: "RW-1046",
-      location: "Naini Bridge",
-      damage: "Pothole",
-      severity: "High",
-      status: "In Progress",
-      date: "24 Aug 2026",
-    },
-    {
-      id: "RW-1045",
-      location: "Station Road",
-      damage: "Surface Damage",
-      severity: "Low",
-      status: "Resolved",
-      date: "24 Aug 2026",
-    },
-    {
-      id: "RW-1044",
-      location: "Civil Lines",
-      damage: "Pothole",
-      severity: "High",
-      status: "Pending",
-      date: "23 Aug 2026",
-    },
-  ];
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetchReports();
+  }, []);
+
+  const fetchReports = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await getReports();
+      setReports(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err.message || "Failed to load reports from database.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatDamageType = (type) => {
+    if (!type) return "Other";
+    return type
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
+
+  const getLocationText = (report) => {
+    if (report.location?.address && report.location.address.trim()) {
+      return report.location.address;
+    }
+    if (
+      report.location?.coordinates &&
+      Array.isArray(report.location.coordinates)
+    ) {
+      const [lng, lat] = report.location.coordinates;
+      if (lat !== 0 || lng !== 0) {
+        return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      }
+    }
+    return "GPS Coordinates Captured";
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return "N/A";
+    return new Date(dateStr).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  const formatStatus = (status) => {
+    if (!status) return "Reported";
+    return status
+      .split("_")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+  };
+
+  const formatReportId = (id) => {
+    if (!id) return "RW-0000";
+    return `RW-${id.slice(-6).toUpperCase()}`;
+  };
 
   return (
     <div className="admin-dashboard">
@@ -103,70 +129,110 @@ function Reports() {
             </div>
 
             <span className="reports-count">
-              {reports.length} reports
+              {loading ? "Loading..." : `${reports.length} reports`}
             </span>
           </div>
 
-          <div className="reports-table-wrapper">
-            <table className="reports-table">
-              <thead>
-                <tr>
-                  <th>Report</th>
-                  <th>Location</th>
-                  <th>Damage</th>
-                  <th>Severity</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                  <th></th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {reports.map((report) => (
-                  <tr key={report.id}>
-                    <td>
-                      <strong>{report.id}</strong>
-                    </td>
-
-                    <td>{report.location}</td>
-
-                    <td>{report.damage}</td>
-
-                    <td>
-                      <span
-                        className={`severity ${report.severity.toLowerCase()}`}
-                      >
-                        {report.severity}
-                      </span>
-                    </td>
-
-                    <td>
-                      <span
-                        className={`status ${report.status
-                          .toLowerCase()
-                          .replace(" ", "-")}`}
-                      >
-                        {report.status}
-                      </span>
-                    </td>
-
-                    <td>{report.date}</td>
-
-                    <td>
-                      <button
-                        className="view-report-button"
-                        onClick={() =>
-                          navigate(`/admin/reports/${report.id}`)
-                        }
-                      >
-                        View →
-                      </button>
-                    </td>
+          {loading ? (
+            <div
+              style={{
+                padding: "40px",
+                textAlign: "center",
+                color: "#8b9c9f",
+                fontSize: "13px",
+              }}
+            >
+              Loading reports from database...
+            </div>
+          ) : error ? (
+            <div
+              style={{
+                padding: "20px",
+                margin: "20px",
+                color: "#ff9b9b",
+                background: "rgba(255, 70, 70, 0.08)",
+                borderRadius: "10px",
+                border: "1px solid rgba(255, 70, 70, 0.2)",
+                fontSize: "12px",
+              }}
+            >
+              ⚠️ {error}
+            </div>
+          ) : reports.length === 0 ? (
+            <div
+              style={{
+                padding: "40px",
+                textAlign: "center",
+                color: "#69777b",
+                fontSize: "13px",
+              }}
+            >
+              No road damage reports found in database.
+            </div>
+          ) : (
+            <div className="reports-table-wrapper">
+              <table className="reports-table">
+                <thead>
+                  <tr>
+                    <th>Report</th>
+                    <th>Location</th>
+                    <th>Damage</th>
+                    <th>Severity</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+
+                <tbody>
+                  {reports.map((report) => {
+                    const displayId = formatReportId(report._id);
+                    const severity = (report.severity || "low").toLowerCase();
+                    const status = (report.status || "reported").toLowerCase();
+
+                    return (
+                      <tr key={report._id || Math.random()}>
+                        <td>
+                          <strong>{displayId}</strong>
+                        </td>
+
+                        <td>{getLocationText(report)}</td>
+
+                        <td>{formatDamageType(report.damageType)}</td>
+
+                        <td>
+                          <span className={`severity ${severity}`}>
+                            {severity.toUpperCase()}
+                          </span>
+                        </td>
+
+                        <td>
+                          <span
+                            className={`status ${status.replace("_", "-")}`}
+                          >
+                            {formatStatus(status)}
+                          </span>
+                        </td>
+
+                        <td>{formatDate(report.createdAt)}</td>
+
+                        <td>
+                          <button
+                            className="view-report-button"
+                            onClick={() =>
+                              navigate(`/admin/reports/${report._id}`)
+                            }
+                          >
+                            View →
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       </main>
     </div>

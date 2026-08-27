@@ -4,7 +4,10 @@ export const getReports = async () => {
   const response = await fetch(`${API_BASE_URL}/reports`);
 
   if (!response.ok) {
-    throw new Error("Failed to fetch reports");
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      errorData.error || errorData.message || "Failed to fetch reports"
+    );
   }
 
   return response.json();
@@ -20,14 +23,17 @@ export const getReportById = async (id) => {
   return response.json();
 };
 
-export const createReport = async (reportData) => {
+export const createReport = async (formData) => {
   const response = await fetch(`${API_BASE_URL}/reports`, {
     method: "POST",
-    body: reportData,
+    body: formData,
   });
 
   if (!response.ok) {
-    throw new Error("Failed to create report");
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      errorData.error || errorData.message || "Failed to create report"
+    );
   }
 
   return response.json();

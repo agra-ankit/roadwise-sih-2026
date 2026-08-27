@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { createReport } from "../../services/api";
+
+const SERVER_BASE = "http://localhost:5000";
 
 function ReportForm() {
   const [image, setImage] = useState(null);
@@ -6,7 +9,9 @@ function ReportForm() {
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState(null);
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [reportResult, setReportResult] = useState(null);
 
   const handleImageChange = (event) => {
     const file = event.target.files[0];
@@ -42,14 +47,16 @@ function ReportForm() {
       },
       () => {
         setError(
-          "Location permission was denied. Please allow location access.",
+          "Location permission was denied. Please allow location access."
         );
-      },
+      }
     );
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
+
+    if (loading) return;
 
     if (!image) {
       setError("Please upload a road damage image.");
@@ -62,23 +69,73 @@ function ReportForm() {
     }
 
     setError("");
+    setLoading(true);
 
-    console.log({
-      image,
-      location,
-      description,
-    });
+    try {
+      const formData = new FormData();
+      formData.append("image", image);
+      formData.append("latitude", String(location.latitude));
+      formData.append("longitude", String(location.longitude));
 
-    setSubmitted(true);
+      if (description && description.trim()) {
+        formData.append("description", description.trim());
+      }
+
+      const response = await createReport(formData);
+      setReportResult(response);
+      setSubmitted(true);
+    } catch (err) {
+      setError(
+        err.message ||
+          "Failed to submit report. Please verify backend service is running."
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
-  if (submitted) {
+  const formatDamageType = (type) => {
+    if (!type) return "Other Damage";
+    return type
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
+
+  const getImageUrl = (relUrl) => {
+    if (!relUrl) return preview;
+    return relUrl.startsWith("http") ? relUrl : `${SERVER_BASE}${relUrl}`;
+  };
+
+  if (submitted && reportResult) {
+    const report = reportResult.report || {};
+    const ai = reportResult.ai_analysis || {};
+    const damageText = formatDamageType(report.damageType || ai.damage_type);
+    const severityText = (
+      report.severity ||
+      ai.severity ||
+      "LOW"
+    ).toUpperCase();
+    const confidencePct =
+      typeof report.confidence === "number"
+        ? (report.confidence * 100).toFixed(1) + "%"
+        : typeof ai.confidence === "number"
+        ? (ai.confidence * 100).toFixed(1) + "%"
+        : "N/A";
+    const priority = report.priorityScore ?? ai.priority_score ?? 0;
+    const statusText = report.status
+      ? report.status.charAt(0).toUpperCase() + report.status.slice(1)
+      : "Reported";
+    const reportId =
+      report._id || `RW-${Math.floor(Math.random() * 90000 + 10000)}`;
+    const displayImg = getImageUrl(report.imageUrl);
+
     return (
       <section className="report-section" id="report">
         <div className="success-card">
           <div className="success-icon">✓</div>
 
-          <div className="success-label">REPORT RECEIVED</div>
+          <div className="success-label">REPORT RECEIVED & AI ANALYZED</div>
 
           <h2>
             Thank you for
@@ -87,23 +144,187 @@ function ReportForm() {
           </h2>
 
           <p>
-            Your road damage report has been recorded. Our system will analyze
-            it and send it to the appropriate authorities.
+            Your road damage report has been analyzed by AI and stored
+            securely in the database.
           </p>
 
           <div className="success-id">
             <span>REPORT ID</span>
-            <strong>RW-{Math.floor(Math.random() * 90000 + 10000)}</strong>
+            <strong>{reportId}</strong>
           </div>
+
+          <div
+            className="ai-summary-box"
+            style={{
+              margin: "24px 0",
+              padding: "20px",
+              borderRadius: "14px",
+              background: "rgba(34, 211, 238, 0.04)",
+              border: "1px solid rgba(34, 211, 238, 0.2)",
+              textAlign: "left",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                gap: "18px",
+                alignItems: "center",
+                flexWrap: "wrap",
+                marginBottom: "16px",
+              }}
+            >
+              {displayImg && (
+                <img
+                  src={displayImg}
+                  alt="Analyzed Road Damage"
+                  style={{
+                    width: "110px",
+                    height: "85px",
+                    objectFit: "cover",
+                    borderRadius: "10px",
+                    border: "1px solid rgba(34, 211, 238, 0.3)",
+                  }}
+                />
+              )}
+              <div style={{ flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: "10px",
+                    color: "#22d3ee",
+                    fontWeight: "700",
+                    letterSpacing: "1px",
+                    marginBottom: "4px",
+                  }}
+                >
+                  AI DETECTED ISSUE
+                </div>
+                <h4 style={{ margin: 0, fontSize: "18px", color: "#f0f6f8" }}>
+                  {damageText}
+                </h4>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "#8b9c9f",
+                    marginTop: "4px",
+                  }}
+                >
+                  Status:{" "}
+                  <span style={{ color: "#22d3ee", fontWeight: "600" }}>
+                    {statusText}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+                gap: "12px",
+                paddingTop: "15px",
+                borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+              }}
+            >
+              <div>
+                <span
+                  style={{
+                    display: "block",
+                    fontSize: "9px",
+                    color: "#647478",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Severity
+                </span>
+                <strong
+                  style={{
+                    fontSize: "13px",
+                    color:
+                      severityText === "HIGH"
+                        ? "#ff4d4d"
+                        : severityText === "MEDIUM"
+                        ? "#ffaa00"
+                        : "#22d3ee",
+                  }}
+                >
+                  {severityText}
+                </strong>
+              </div>
+
+              <div>
+                <span
+                  style={{
+                    display: "block",
+                    fontSize: "9px",
+                    color: "#647478",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  AI Confidence
+                </span>
+                <strong style={{ fontSize: "13px", color: "#f0f6f8" }}>
+                  {confidencePct}
+                </strong>
+              </div>
+
+              <div>
+                <span
+                  style={{
+                    display: "block",
+                    fontSize: "9px",
+                    color: "#647478",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Priority Score
+                </span>
+                <strong style={{ fontSize: "13px", color: "#22d3ee" }}>
+                  {priority} / 100
+                </strong>
+              </div>
+            </div>
+          </div>
+
+          {location &&
+            typeof location.latitude === "number" &&
+            typeof location.longitude === "number" &&
+            (location.latitude !== 0 || location.longitude !== 0) && (
+              <a
+                href={`https://www.google.com/maps?q=${location.latitude},${location.longitude}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "6px",
+                  margin: "0 0 20px 0",
+                  padding: "12px 18px",
+                  borderRadius: "10px",
+                  background: "rgba(34, 211, 238, 0.12)",
+                  color: "#22d3ee",
+                  border: "1px solid rgba(34, 211, 238, 0.3)",
+                  textDecoration: "none",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  width: "100%",
+                  boxSizing: "border-box",
+                }}
+              >
+                📍 Open Location in Google Maps ↗
+              </a>
+            )}
 
           <button
             className="secondary-button"
             onClick={() => {
               setSubmitted(false);
+              setReportResult(null);
               setImage(null);
               setPreview("");
               setLocation(null);
               setDescription("");
+              setError("");
             }}
           >
             Submit another report →
@@ -253,9 +474,14 @@ function ReportForm() {
 
           {error && <div className="form-error">⚠ {error}</div>}
 
-          <button type="submit" className="submit-report">
-            <span>Submit Road Report</span>
-            <span className="submit-arrow">→</span>
+          <button
+            type="submit"
+            className="submit-report"
+            disabled={loading}
+            style={{ opacity: loading ? 0.7 : 1, cursor: loading ? "not-allowed" : "pointer" }}
+          >
+            <span>{loading ? "Analyzing & Submitting..." : "Submit Road Report"}</span>
+            <span className="submit-arrow">{loading ? "⏳" : "→"}</span>
           </button>
 
           <p className="form-note">

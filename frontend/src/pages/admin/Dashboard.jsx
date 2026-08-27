@@ -1,61 +1,113 @@
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { getReports } from "../../services/api";
 
 function Dashboard() {
   const navigate = useNavigate();
 
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetchReports();
+  }, []);
+
+  const fetchReports = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await getReports();
+      setReports(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err.message || "Failed to load dashboard data from database.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatDamageType = (type) => {
+    if (!type) return "Other";
+    return type
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
+
+  const getLocationText = (report) => {
+    if (report.location?.address && report.location.address.trim()) {
+      return report.location.address;
+    }
+    if (
+      report.location?.coordinates &&
+      Array.isArray(report.location.coordinates)
+    ) {
+      const [lng, lat] = report.location.coordinates;
+      if (lat !== 0 || lng !== 0) {
+        return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      }
+    }
+    return "GPS Coordinates Captured";
+  };
+
+  const formatReportId = (id) => {
+    if (!id) return "RW-0000";
+    return `RW-${id.slice(-6).toUpperCase()}`;
+  };
+
+  const formatStatus = (status) => {
+    if (!status) return "Reported";
+    return status
+      .split("_")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+  };
+
+  // Compute live statistics from MongoDB reports
+  const totalReports = reports.length;
+  const pendingCount = reports.filter(
+    (r) =>
+      (r.status || "").toLowerCase() === "reported" ||
+      (r.status || "").toLowerCase() === "pending"
+  ).length;
+  const highPriorityCount = reports.filter(
+    (r) =>
+      (r.severity || "").toLowerCase() === "high" || (r.priorityScore || 0) >= 70
+  ).length;
+  const resolvedCount = reports.filter(
+    (r) =>
+      (r.status || "").toLowerCase() === "completed" ||
+      (r.status || "").toLowerCase() === "resolved"
+  ).length;
+  const resolvedPercent =
+    totalReports > 0 ? Math.round((resolvedCount / totalReports) * 100) : 0;
+  const maxPriorityScore =
+    reports.length > 0 ? Math.max(...reports.map((r) => r.priorityScore || 0)) : 0;
+
   const stats = [
     {
       label: "Total Reports",
-      value: "1,248",
-      change: "+12%",
+      value: totalReports.toLocaleString(),
+      change: `${totalReports} total submitted`,
     },
     {
       label: "Pending",
-      value: "186",
-      change: "Needs attention",
+      value: pendingCount.toLocaleString(),
+      change: pendingCount > 0 ? "Needs attention" : "All clear",
     },
     {
       label: "High Priority",
-      value: "42",
-      change: "Urgent",
+      value: highPriorityCount.toLocaleString(),
+      change: highPriorityCount > 0 ? "Urgent response" : "No urgent issues",
     },
     {
       label: "Resolved",
-      value: "1,020",
-      change: "82% resolved",
+      value: resolvedCount.toLocaleString(),
+      change: `${resolvedPercent}% resolved`,
     },
   ];
 
-  const recentReports = [
-    {
-      id: "RW-1048",
-      location: "MG Road",
-      damage: "Pothole",
-      severity: "High",
-      status: "Pending",
-    },
-    {
-      id: "RW-1047",
-      location: "Civil Lines",
-      damage: "Road Crack",
-      severity: "Medium",
-      status: "Assigned",
-    },
-    {
-      id: "RW-1046",
-      location: "Naini Bridge",
-      damage: "Pothole",
-      severity: "High",
-      status: "In Progress",
-    },
-    {
-      id: "RW-1045",
-      location: "Station Road",
-      damage: "Surface Damage",
-      severity: "Low",
-      status: "Resolved",
-    },
-  ];
+  const recentReports = reports.slice(0, 4);
 
   return (
     <div className="admin-dashboard">
@@ -106,11 +158,27 @@ function Dashboard() {
           </div>
         </header>
 
+        {error && (
+          <div
+            style={{
+              padding: "16px 20px",
+              marginBottom: "20px",
+              color: "#ff9b9b",
+              background: "rgba(255, 70, 70, 0.08)",
+              borderRadius: "10px",
+              border: "1px solid rgba(255, 70, 70, 0.2)",
+              fontSize: "12px",
+            }}
+          >
+            ⚠️ {error}
+          </div>
+        )}
+
         <section className="admin-stats">
           {stats.map((stat) => (
             <div className="admin-stat-card" key={stat.label}>
               <span>{stat.label}</span>
-              <strong>{stat.value}</strong>
+              <strong>{loading ? "..." : stat.value}</strong>
               <small>{stat.change}</small>
             </div>
           ))}
@@ -129,32 +197,58 @@ function Dashboard() {
               </button>
             </div>
 
-            <div className="admin-report-list">
-              {recentReports.map((report) => (
-                <div className="admin-report-row" key={report.id}>
-                  <div className="report-id">{report.id}</div>
+            {loading ? (
+              <div
+                style={{
+                  padding: "30px",
+                  textAlign: "center",
+                  color: "#8b9c9f",
+                  fontSize: "12px",
+                }}
+              >
+                Loading activity...
+              </div>
+            ) : recentReports.length === 0 ? (
+              <div
+                style={{
+                  padding: "30px",
+                  textAlign: "center",
+                  color: "#69777b",
+                  fontSize: "12px",
+                }}
+              >
+                No report activity recorded yet.
+              </div>
+            ) : (
+              <div className="admin-report-list">
+                {recentReports.map((report) => {
+                  const displayId = formatReportId(report._id);
+                  const severity = (report.severity || "low").toLowerCase();
+                  const status = (report.status || "reported").toLowerCase();
 
-                  <div className="report-info">
-                    <strong>{report.damage}</strong>
-                    <span>{report.location}</span>
-                  </div>
+                  return (
+                    <div className="admin-report-row" key={report._id || Math.random()}>
+                      <div className="report-id">{displayId}</div>
 
-                  <span
-                    className={`severity ${report.severity.toLowerCase()}`}
-                  >
-                    {report.severity}
-                  </span>
+                      <div className="report-info">
+                        <strong>{formatDamageType(report.damageType)}</strong>
+                        <span>{getLocationText(report)}</span>
+                      </div>
 
-                  <span
-                    className={`status ${report.status
-                      .toLowerCase()
-                      .replace(" ", "-")}`}
-                  >
-                    {report.status}
-                  </span>
-                </div>
-              ))}
-            </div>
+                      <span className={`severity ${severity}`}>
+                        {severity.toUpperCase()}
+                      </span>
+
+                      <span
+                        className={`status ${status.replace("_", "-")}`}
+                      >
+                        {formatStatus(status)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="admin-panel priority-panel">
@@ -166,21 +260,21 @@ function Dashboard() {
             </div>
 
             <div className="priority-score">
-              <strong>87</strong>
+              <strong>{loading ? "--" : maxPriorityScore}</strong>
               <span>/100</span>
             </div>
 
             <p className="priority-description">
-              Current road damage requiring the fastest response.
+              Current highest road damage priority requiring fast response.
             </p>
 
             <div className="priority-bar">
-              <span></span>
+              <span style={{ width: `${loading ? 0 : Math.min(100, maxPriorityScore)}%` }}></span>
             </div>
 
             <div className="priority-meta">
               <span>High priority reports</span>
-              <strong>42</strong>
+              <strong>{loading ? "..." : highPriorityCount}</strong>
             </div>
 
             <button
