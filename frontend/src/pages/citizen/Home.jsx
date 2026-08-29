@@ -3,6 +3,7 @@ import Hero from "../../components/citizen/Hero";
 import Stats from "../../components/citizen/Stats";
 import HowItWorks from "../../components/citizen/HowItWorks";
 import ReportForm from "../../components/citizen/ReportForm";
+import TrackReport from "../../components/citizen/TrackReport";
 import CTA from "../../components/citizen/CTA";
 import Footer from "../../components/citizen/Footer";
 
@@ -20,6 +21,7 @@ function Home() {
         <Stats />
         <HowItWorks />
         <ReportForm />
+        <TrackReport />
         <CTA />
       </main>
 

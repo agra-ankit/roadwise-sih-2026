@@ -9,19 +9,26 @@ import AdminReports from "./pages/admin/Reports";
 import ReportDetails from "./pages/admin/ReportDetails";
 import IssueDetails from "./pages/admin/IssueDetails";
 import AdminMap from "./pages/admin/Map";
+import ProtectedRoute from "./components/admin/ProtectedRoute";
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<CitizenHome />} />
 
+        {/* Public Admin Login */}
         <Route path="/admin/login" element={<AdminLogin />} />
 
-        <Route path="/admin/dashboard" element={<AdminDashboard />} />
-        <Route path="/admin/reports" element={<AdminReports />} />
-        <Route path="/admin/reports/:id" element={<ReportDetails />} />
-        <Route path="/admin/issues/:id" element={<IssueDetails />} />
-        <Route path="/admin/map" element={<AdminMap />} />
+        {/* Protected Municipal Admin Routes */}
+        <Route element={<ProtectedRoute />}>
+          <Route path="/admin/dashboard" element={<AdminDashboard />} />
+          <Route path="/admin/reports" element={<AdminReports />} />
+          <Route path="/admin/reports/:id" element={<ReportDetails />} />
+          <Route path="/admin/issues/:id" element={<IssueDetails />} />
+          <Route path="/admin/map" element={<AdminMap />} />
+        </Route>
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 
-require("dotenv").config();
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 const connectDB = require("./config/db");
 
 const Report = require("./models/report.model");
@@ -16,6 +16,8 @@ const aiRoutes = require("./routes/ai.routes");
 const reportRoutes = require("./routes/report.routes");
 // Step 4: MongoDB Issue retrieval integration
 const issueRoutes = require("./routes/issue.routes");
+// Step 5: Admin JWT Authentication
+const authRoutes = require("./routes/auth.routes");
 
 const app = express();
 
@@ -31,6 +33,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/ai", aiRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/issues", issueRoutes);
+app.use("/api/auth", authRoutes);
 
 app.get("/", (req, res) => {
   res.json({
@@ -658,7 +661,7 @@ app.post("/auth/login", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 
 // Start server after MongoDB connection and 2dsphere index initialization are complete
 const startServer = async () => {

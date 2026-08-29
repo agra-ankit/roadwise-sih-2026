@@ -1,6 +1,7 @@
 import io
 from fastapi import FastAPI, File, UploadFile
 from PIL import Image
+import numpy as np
 from ultralytics import YOLO
 from pathlib import Path
 
@@ -76,8 +77,18 @@ async def predict(file: UploadFile = File(...)):
     img_width, img_height = image.size
 
     # Run YOLO inference
-    results = model(image , conf = 0.35)
+    results = model(image, conf=0.35)
     result = results[0]
+
+    # Road Scene & Skin Analysis (Used only to prevent close-up portrait false positives on open_manholes)
+    np_img = np.array(image)
+    r = np_img[:, :, 0].astype(int)
+    g = np_img[:, :, 1].astype(int)
+    b = np_img[:, :, 2].astype(int)
+
+    # Human skin tone detector (R > 95, G > 40, B > 20, R > G > B, (R-G) > 15, (R-B) > 15)
+    skin_mask = (r > 95) & (g > 40) & (b > 20) & ((r - g) > 15) & (r > b) & ((r - b) > 15)
+    skin_ratio = float((np.sum(skin_mask) / (img_width * img_height)) * 100)
 
     detections = []
     
@@ -105,6 +116,21 @@ async def predict(file: UploadFile = File(...)):
         top_damage_type = primary["class"]
         top_confidence = primary["confidence"]
         top_severity = primary["severity"]
+
+        # If YOLO flagged open_manhole on a close-up human selfie portrait (skin > 15%), reject false positive
+        if top_damage_type == "open_manhole" and skin_ratio > 15.0:
+            return {
+                "filename": file.filename,
+                "damage_detected": False,
+                "damage_type": "other",
+                "severity": None,
+                "confidence": 0.0,
+                "priority_score": 0,
+                "detections": [],
+                "rejection_reason": "Human portrait / non-road photo detected. Please photograph the road surface.",
+                "skin_pct": round(skin_ratio, 1),
+            }
+
         priority_score = calculate_priority_score(top_damage_type, top_severity, top_confidence)
 
         return {
@@ -114,7 +140,8 @@ async def predict(file: UploadFile = File(...)):
             "severity": top_severity,
             "confidence": top_confidence,
             "priority_score": priority_score,
-            "detections": detections
+            "detections": detections,
+            "skin_pct": round(skin_ratio, 1),
         }
     else:
         return {
@@ -124,5 +151,7 @@ async def predict(file: UploadFile = File(...)):
             "severity": None,
             "confidence": 0.0,
             "priority_score": 0,
-            "detections": []
+            "detections": [],
+            "rejection_reason": "No road damage or pothole detected in image",
+            "skin_pct": round(skin_ratio, 1),
         }

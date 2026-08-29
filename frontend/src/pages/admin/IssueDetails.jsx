@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getIssueById } from "../../services/api";
+import { getIssueById, logoutAdmin, SERVER_BASE_URL } from "../../services/api";
+import SLATimer from "../../components/admin/SLATimer";
+import WorkOrderModal from "../../components/admin/WorkOrderModal";
 
-const SERVER_BASE = "http://localhost:5000";
+const SERVER_BASE = SERVER_BASE_URL;
 
 function IssueDetails() {
   const navigate = useNavigate();
@@ -12,32 +14,48 @@ function IssueDetails() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showSupportingReports, setShowSupportingReports] = useState(true);
+  const [showWorkOrderModal, setShowWorkOrderModal] = useState(false);
 
   useEffect(() => {
-    if (id) {
-      fetchIssueDetails();
-    } else {
-      setError("No issue ID supplied.");
-      setLoading(false);
-    }
-  }, [id]);
+    let isMounted = true;
 
-  const fetchIssueDetails = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await getIssueById(id);
-      if (data) {
-        setIssue(data);
-      } else {
-        setError("Issue not found in database.");
+    const loadIssueData = async () => {
+      if (!id) {
+        if (isMounted) {
+          setError("No issue ID supplied.");
+          setLoading(false);
+        }
+        return;
       }
-    } catch (err) {
-      setError(err.message || "Failed to load issue details from database.");
-    } finally {
-      setLoading(false);
-    }
-  };
+
+      setLoading(true);
+      setError("");
+      try {
+        const data = await getIssueById(id);
+        if (isMounted) {
+          if (data) {
+            setIssue(data);
+          } else {
+            setError("Issue not found in database.");
+          }
+        }
+      } catch (err) {
+        if (isMounted) {
+          setError(err.message || "Failed to load issue details from database.");
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadIssueData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [id]);
 
   const formatDamageType = (type) => {
     if (!type) return "Other Damage";
@@ -112,7 +130,10 @@ function IssueDetails() {
 
         <button
           className="admin-logout"
-          onClick={() => navigate("/admin/login")}
+          onClick={() => {
+            logoutAdmin();
+            navigate("/admin/login");
+          }}
         >
           Sign out
         </button>
@@ -185,9 +206,19 @@ function IssueDetails() {
                   <h2>{formatIssueId(issue._id)}</h2>
                 </div>
 
-                <span className={`status ${(issue.status || "reported").toLowerCase().replace("_", "-")}`}>
-                  {statusText}
-                </span>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  <SLATimer
+                    createdAt={issue.createdAt}
+                    targetDeadline={issue.targetDeadline}
+                    slaHours={issue.slaHours || 24}
+                    status={issue.status}
+                    severity={issue.severity}
+                  />
+
+                  <span className={`status ${(issue.status || "reported").toLowerCase().replace("_", "-")}`}>
+                    {statusText}
+                  </span>
+                </div>
               </div>
 
               {/* ROAD ISSUE SUMMARY CARD */}
@@ -231,6 +262,27 @@ function IssueDetails() {
                   <span style={{ color: "#8b9c9f", fontSize: "13px" }}>Status</span>
                   <strong style={{ color: "#f1f5f9", fontSize: "14px" }}>{statusText}</strong>
                 </div>
+
+                {issue.contextTags && issue.contextTags.length > 0 && (
+                  <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                    {issue.contextTags.map((tag) => (
+                      <span
+                        key={tag}
+                        style={{
+                          background: "rgba(234, 179, 8, 0.12)",
+                          color: "#facc15",
+                          border: "1px solid rgba(234, 179, 8, 0.3)",
+                          padding: "3px 8px",
+                          borderRadius: "5px",
+                          fontSize: "10px",
+                          fontWeight: "700",
+                        }}
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* ACTION BUTTONS */}
@@ -248,6 +300,21 @@ function IssueDetails() {
                   onClick={() => setShowSupportingReports(!showSupportingReports)}
                 >
                   📋 {showSupportingReports ? "Hide Supporting Reports" : `View Supporting Reports (${issue.reports?.length || 0})`}
+                </button>
+
+                <button
+                  className="detail-action"
+                  style={{
+                    background: "rgba(34, 211, 238, 0.12)",
+                    borderColor: "rgba(34, 211, 238, 0.3)",
+                    color: "#22d3ee",
+                    fontWeight: "700",
+                    fontSize: "13px",
+                    padding: "12px 18px",
+                  }}
+                  onClick={() => setShowWorkOrderModal(true)}
+                >
+                  📄 Generate Work Order PDF
                 </button>
 
                 {isValidCoordinates ? (
@@ -405,6 +472,34 @@ function IssueDetails() {
               </div>
             </div>
           </section>
+        )}
+
+        {/* Modal for Municipal Work Order PDF Generator */}
+        {showWorkOrderModal && (
+          <WorkOrderModal
+            report={
+              issue.reports && issue.reports.length > 0 && typeof issue.reports[0] === "object"
+                ? {
+                    ...issue.reports[0],
+                    damageType: issue.damageType,
+                    severity: issue.severity,
+                    priorityScore: issue.priorityScore,
+                    location: issue.location,
+                    assignedTeam: issue.assignedTeam,
+                    slaHours: issue.slaHours,
+                  }
+                : {
+                    _id: issue._id,
+                    damageType: issue.damageType,
+                    severity: issue.severity,
+                    priorityScore: issue.priorityScore,
+                    location: issue.location,
+                    assignedTeam: issue.assignedTeam,
+                    slaHours: issue.slaHours,
+                  }
+            }
+            onClose={() => setShowWorkOrderModal(false)}
+          />
         )}
       </main>
     </div>

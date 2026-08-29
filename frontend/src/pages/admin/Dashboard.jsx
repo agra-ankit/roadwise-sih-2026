@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { getReports, getIssues } from "../../services/api";
+import { getReports, getIssues, logoutAdmin } from "../../services/api";
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -11,25 +11,37 @@ function Dashboard() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    let isMounted = true;
 
-  const fetchDashboardData = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const [reportsData, issuesData] = await Promise.all([
-        getReports().catch(() => []),
-        getIssues().catch(() => []),
-      ]);
-      setReports(Array.isArray(reportsData) ? reportsData : []);
-      setIssues(Array.isArray(issuesData) ? issuesData : []);
-    } catch (err) {
-      setError(err.message || "Failed to load dashboard data from database.");
-    } finally {
-      setLoading(false);
-    }
-  };
+    const loadDashboardData = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const [reportsData, issuesData] = await Promise.all([
+          getReports().catch(() => []),
+          getIssues().catch(() => []),
+        ]);
+        if (isMounted) {
+          setReports(Array.isArray(reportsData) ? reportsData : []);
+          setIssues(Array.isArray(issuesData) ? issuesData : []);
+        }
+      } catch (err) {
+        if (isMounted) {
+          setError(err.message || "Failed to load dashboard data from database.");
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadDashboardData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const formatDamageType = (type) => {
     if (!type) return "Other";
@@ -146,7 +158,10 @@ function Dashboard() {
 
         <button
           className="admin-logout"
-          onClick={() => navigate("/admin/login")}
+          onClick={() => {
+            logoutAdmin();
+            navigate("/admin/login");
+          }}
         >
           Sign out
         </button>
@@ -237,13 +252,13 @@ function Dashboard() {
               </div>
             ) : (
               <div className="admin-report-list">
-                {recentReports.map((report) => {
+                {recentReports.map((report, index) => {
                   const displayId = formatReportId(report._id);
                   const severity = (report.severity || "low").toLowerCase();
                   const status = (report.status || "reported").toLowerCase();
 
                   return (
-                    <div className="admin-report-row" key={report._id || Math.random()}>
+                    <div className="admin-report-row" key={report._id || `report-${index}`}>
                       <div className="report-id">{displayId}</div>
 
                       <div className="report-info">
