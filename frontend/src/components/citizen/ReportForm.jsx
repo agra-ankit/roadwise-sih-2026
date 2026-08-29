@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createReport } from "../../services/api";
 
 const SERVER_BASE = "http://localhost:5000";
@@ -30,27 +30,122 @@ function ReportForm() {
     setPreview(imageUrl);
   };
 
+  const [locating, setLocating] = useState(false);
+  const [gpsStatus, setGpsStatus] = useState("");
+  const [bestAccuracy, setBestAccuracy] = useState(null);
+
+  const watchIdRef = useRef(null);
+  const timeoutIdRef = useRef(null);
+
+  const stopGpsWatch = () => {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    if (timeoutIdRef.current !== null) {
+      clearTimeout(timeoutIdRef.current);
+      timeoutIdRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stopGpsWatch();
+    };
+  }, []);
+
   const getLocation = () => {
     setError("");
+    stopGpsWatch();
 
     if (!navigator.geolocation) {
       setError("Location is not supported by your browser.");
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
+    setLocating(true);
+    setGpsStatus("Finding your precise location...");
+    setBestAccuracy(null);
+
+    let readings = [];
+    let currentBest = null;
+
+    const finalizeLocation = (bestReading) => {
+      stopGpsWatch();
+      setLocating(false);
+
+      if (bestReading) {
         setLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
+          latitude: bestReading.latitude,
+          longitude: bestReading.longitude,
+          accuracy: bestReading.accuracy,
         });
-      },
-      () => {
-        setError(
-          "Location permission was denied. Please allow location access."
-        );
+
+        if (bestReading.accuracy > 30) {
+          setGpsStatus(`Low GPS accuracy (~${Math.round(bestReading.accuracy)}m). Outdoor view recommended.`);
+        } else {
+          setGpsStatus(`✓ High-accuracy location found (±${Math.round(bestReading.accuracy)}m)`);
+        }
+      } else {
+        setError("Unable to acquire location reading. Please try again.");
       }
-    );
+    };
+
+    // 10-second acquisition timeout safeguard
+    timeoutIdRef.current = setTimeout(() => {
+      finalizeLocation(currentBest);
+    }, 10000);
+
+    try {
+      const watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const reading = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+          };
+
+          readings.push(reading);
+
+          if (!currentBest || reading.accuracy < currentBest.accuracy) {
+            currentBest = reading;
+            setBestAccuracy(Math.round(reading.accuracy));
+            setGpsStatus(`Improving location... Best accuracy: ±${Math.round(reading.accuracy)}m`);
+          }
+
+          // Early success: accuracy <= 12m or 5 valid readings collected
+          if (reading.accuracy <= 12 || readings.length >= 5) {
+            finalizeLocation(currentBest);
+          }
+        },
+        (err) => {
+          stopGpsWatch();
+          setLocating(false);
+          if (err.code === err.PERMISSION_DENIED) {
+            setError("Location permission denied. Please allow location access in your browser.");
+          } else if (err.code === err.TIMEOUT) {
+            if (currentBest) {
+              finalizeLocation(currentBest);
+            } else {
+              setError("GPS location request timed out. Please try again or check location settings.");
+            }
+          } else {
+            setError("Unable to determine your location. Please try again.");
+          }
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 10000,
+        }
+      );
+
+      watchIdRef.current = watchId;
+    } catch (e) {
+      stopGpsWatch();
+      setLocating(false);
+      setError("Failed to initiate GPS location acquisition.");
+    }
   };
 
   const handleSubmit = async (event) => {
@@ -76,6 +171,10 @@ function ReportForm() {
       formData.append("image", image);
       formData.append("latitude", String(location.latitude));
       formData.append("longitude", String(location.longitude));
+
+      if (typeof location.accuracy === "number") {
+        formData.append("locationAccuracy", String(location.accuracy));
+      }
 
       if (description && description.trim()) {
         formData.append("description", description.trim());
@@ -430,26 +529,37 @@ function ReportForm() {
                 location ? "location-success" : ""
               }`}
               onClick={getLocation}
+              disabled={locating}
             >
               <span className="location-button-icon">
-                {location ? "✓" : "⌖"}
+                {locating ? "⏳" : location ? "✓" : "⌖"}
               </span>
 
               <div>
                 <strong>
-                  {location ? "Location captured" : "Use my current location"}
+                  {locating
+                    ? "Capturing GPS location..."
+                    : location
+                    ? "Location captured"
+                    : "Use my current location"}
                 </strong>
 
                 <small>
-                  {location
+                  {locating
+                    ? "Requesting high-accuracy positioning..."
+                    : location
                     ? `${location.latitude.toFixed(
                         5,
-                      )}, ${location.longitude.toFixed(5)}`
+                      )}, ${location.longitude.toFixed(5)}${
+                        typeof location.accuracy === "number"
+                          ? ` (±${Math.round(location.accuracy)}m)`
+                          : ""
+                      }`
                     : "We only use this to locate the issue"}
                 </small>
               </div>
 
-              {!location && <span className="button-arrow">→</span>}
+              {!location && !locating && <span className="button-arrow">→</span>}
             </button>
           </div>
 

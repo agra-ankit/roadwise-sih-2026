@@ -3,6 +3,7 @@ const path = require("path");
 const axios = require("axios");
 const FormData = require("form-data");
 const Report = require("../models/report.model");
+const Issue = require("../models/issue.model");
 
 /**
  * Create a new damage report with AI analysis and save to MongoDB
@@ -82,9 +83,19 @@ const createReport = async (req, res) => {
     const confidence = typeof aiResult.confidence === "number" ? aiResult.confidence : 0;
     const priorityScore = typeof aiResult.priority_score === "number" ? aiResult.priority_score : 0;
 
-    // 5. Parse location coordinates [longitude, latitude]
+    // 5. Parse location coordinates [longitude, latitude] & accuracy
     const latitude = parseFloat(req.body.latitude || req.body.lat) || 0;
     const longitude = parseFloat(req.body.longitude || req.body.lng || req.body.lon) || 0;
+    
+    let locationAccuracy = null;
+    const rawAccuracy = req.body.locationAccuracy || req.body.accuracy;
+    if (rawAccuracy !== undefined && rawAccuracy !== null && rawAccuracy !== "") {
+      const parsedAcc = parseFloat(rawAccuracy);
+      if (!isNaN(parsedAcc) && isFinite(parsedAcc) && parsedAcc >= 0) {
+        locationAccuracy = parsedAcc;
+      }
+    }
+
     const address = req.body.address || "";
     const description = req.body.description || "";
 
@@ -96,6 +107,7 @@ const createReport = async (req, res) => {
         coordinates: [longitude, latitude], // GeoJSON order: [lng, lat]
         address,
       },
+      locationAccuracy,
       damageType,
       severity,
       confidence,
@@ -111,10 +123,131 @@ const createReport = async (req, res) => {
     const report = new Report(reportData);
     const savedReport = await report.save();
 
+    // 7. Smart Duplicate Issue Detection & Clustering
+    let issue = null;
+    try {
+      const isValidCoordinates =
+        typeof longitude === "number" &&
+        typeof latitude === "number" &&
+        !isNaN(longitude) &&
+        !isNaN(latitude) &&
+        (longitude !== 0 || latitude !== 0) &&
+        longitude >= -180 &&
+        longitude <= 180 &&
+        latitude >= -90 &&
+        latitude <= 90;
+
+      if (isValidCoordinates) {
+        // Step 2.5: Supporting-Report Based Grouping
+        // 1. Search for any existing supporting Report (other than savedReport itself) within 30m matching exact damageType
+        const nearbyReport = await Report.findOne({
+          _id: { $ne: savedReport._id },
+          damageType: damageType,
+          location: {
+            $near: {
+              $geometry: {
+                type: "Point",
+                coordinates: [longitude, latitude],
+              },
+              $maxDistance: 30, // 30 meters maximum clustering distance
+            },
+          },
+        });
+
+        let targetIssue = null;
+
+        if (nearbyReport) {
+          // Find the parent Issue containing this nearby supporting report
+          targetIssue = await Issue.findOne({ reports: nearbyReport._id });
+        }
+
+        // 2. Fallback: If no nearby supporting report was found, check $near directly on Issue location
+        if (!targetIssue) {
+          targetIssue = await Issue.findOne({
+            damageType: damageType,
+            location: {
+              $near: {
+                $geometry: {
+                  type: "Point",
+                  coordinates: [longitude, latitude],
+                },
+                $maxDistance: 30,
+              },
+            },
+          });
+        }
+
+        if (targetIssue) {
+          // Attach report to existing Issue safely without duplicate IDs
+          issue = targetIssue;
+          const reportIdStr = savedReport._id.toString();
+          const existingReportIds = issue.reports.map((id) => id.toString());
+
+          if (!existingReportIds.includes(reportIdStr)) {
+            issue.reports.push(savedReport._id);
+          }
+          issue.reportCount = issue.reports.length;
+
+          // Severity aggregation rule: Issue severity represents the highest severity among linked reports (low < medium < high)
+          const severityOrder = { low: 1, medium: 2, high: 3 };
+          const currentWeight = severityOrder[issue.severity] || 1;
+          const newWeight = severityOrder[severity] || 1;
+          if (newWeight > currentWeight) {
+            issue.severity = severity;
+          }
+
+          // Priority score calculation: preserve maximum priority score
+          if (priorityScore > (issue.priorityScore || 0)) {
+            issue.priorityScore = priorityScore;
+          }
+
+          issue.updatedAt = new Date();
+          await issue.save();
+        } else {
+          // Create new Issue for this report
+          issue = new Issue({
+            damageType: damageType,
+            severity: severity,
+            location: {
+              type: "Point",
+              coordinates: [longitude, latitude],
+              address: address,
+            },
+            locationAccuracy: locationAccuracy,
+            reports: [savedReport._id],
+            reportCount: 1,
+            priorityScore: priorityScore,
+            status: "reported",
+          });
+          await issue.save();
+        }
+      } else {
+        // Fallback for missing/zero coordinates: create standalone Issue
+        issue = new Issue({
+          damageType: damageType,
+          severity: severity,
+          location: {
+            type: "Point",
+            coordinates: [longitude, latitude],
+            address: address,
+          },
+          reports: [savedReport._id],
+          reportCount: 1,
+          priorityScore: priorityScore,
+          status: "reported",
+        });
+        await issue.save();
+      }
+    } catch (groupingError) {
+      console.error("Smart Issue Grouping error (Report saved safely):", groupingError);
+      // Fail-safe: Report remains saved safely in MongoDB even if grouping encounters an issue
+    }
+
     return res.status(201).json({
       message: "Report created successfully",
       report: savedReport,
       ai_analysis: aiResult,
+      issue: issue,
     });
 
   } catch (error) {

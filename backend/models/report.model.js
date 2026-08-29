@@ -30,6 +30,12 @@ const reportSchema = new mongoose.Schema(
       }
     },
 
+    locationAccuracy: {
+      type: Number, // Device GPS estimated accuracy radius in meters
+      min: 0,
+      default: null
+    },
+
     damageType: {
       type: String,
       enum: ["pothole","open_manhole", "crack", "road_surface_damage", "other"],

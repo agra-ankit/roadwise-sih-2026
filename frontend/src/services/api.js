@@ -54,3 +54,26 @@ export const updateReportStatus = async (id, status) => {
 
   return response.json();
 };
+
+export const getIssues = async () => {
+  const response = await fetch(`${API_BASE_URL}/issues`);
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      errorData.error || errorData.message || "Failed to fetch issues"
+    );
+  }
+
+  return response.json();
+};
+
+export const getIssueById = async (id) => {
+  const response = await fetch(`${API_BASE_URL}/issues/${id}`);
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch issue");
+  }
+
+  return response.json();
+};

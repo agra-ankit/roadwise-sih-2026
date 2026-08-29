@@ -7,6 +7,7 @@ import AdminLogin from "./pages/admin/Login";
 import AdminDashboard from "./pages/admin/Dashboard";
 import AdminReports from "./pages/admin/Reports";
 import ReportDetails from "./pages/admin/ReportDetails";
+import IssueDetails from "./pages/admin/IssueDetails";
 import AdminMap from "./pages/admin/Map";
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
         <Route path="/admin/reports" element={<AdminReports />} />
         <Route path="/admin/reports/:id" element={<ReportDetails />} />
+        <Route path="/admin/issues/:id" element={<IssueDetails />} />
         <Route path="/admin/map" element={<AdminMap />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

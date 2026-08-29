@@ -1,24 +1,29 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { getReports } from "../../services/api";
+import { getReports, getIssues } from "../../services/api";
 
 function Dashboard() {
   const navigate = useNavigate();
 
   const [reports, setReports] = useState([]);
+  const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetchReports();
+    fetchDashboardData();
   }, []);
 
-  const fetchReports = async () => {
+  const fetchDashboardData = async () => {
     setLoading(true);
     setError("");
     try {
-      const data = await getReports();
-      setReports(Array.isArray(data) ? data : []);
+      const [reportsData, issuesData] = await Promise.all([
+        getReports().catch(() => []),
+        getIssues().catch(() => []),
+      ]);
+      setReports(Array.isArray(reportsData) ? reportsData : []);
+      setIssues(Array.isArray(issuesData) ? issuesData : []);
     } catch (err) {
       setError(err.message || "Failed to load dashboard data from database.");
     } finally {
@@ -63,8 +68,9 @@ function Dashboard() {
       .join(" ");
   };
 
-  // Compute live statistics from MongoDB reports
+  // Compute live statistics from MongoDB reports and grouped issues
   const totalReports = reports.length;
+  const totalIssues = issues.length;
   const pendingCount = reports.filter(
     (r) =>
       (r.status || "").toLowerCase() === "reported" ||
@@ -88,7 +94,12 @@ function Dashboard() {
     {
       label: "Total Reports",
       value: totalReports.toLocaleString(),
-      change: `${totalReports} total submitted`,
+      change: `${totalReports} citizen submissions`,
+    },
+    {
+      label: "Total Issues",
+      value: totalIssues.toLocaleString(),
+      change: "Grouped road problems",
     },
     {
       label: "Pending",
@@ -174,7 +185,12 @@ function Dashboard() {
           </div>
         )}
 
-        <section className="admin-stats">
+        <section
+          className="admin-stats"
+          style={{
+            gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))"
+          }}
+        >
           {stats.map((stat) => (
             <div className="admin-stat-card" key={stat.label}>
               <span>{stat.label}</span>

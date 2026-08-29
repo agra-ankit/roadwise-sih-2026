@@ -3,39 +3,58 @@ import { useNavigate } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { getReports } from "../../services/api";
+import { getIssues, getReports } from "../../services/api";
 
-// Custom glowing DivIcons matching severity levels
-const createSeverityIcon = (severity) => {
+// Custom glowing DivIcon for Issues with optional report count badge
+const createIssueMarkerIcon = (severity, reportCount) => {
   const sev = (severity || "low").toLowerCase();
   const color =
     sev === "high" ? "#ff4d4d" : sev === "medium" ? "#ffaa00" : "#22d3ee";
+  const count = reportCount || 1;
+  const badgeHtml =
+    count > 1
+      ? `<span style="
+          position: absolute;
+          top: -7px;
+          right: -9px;
+          background: #080e10;
+          color: ${color};
+          border: 1.5px solid ${color};
+          border-radius: 10px;
+          font-size: 9px;
+          font-weight: 800;
+          padding: 1px 4px;
+          box-shadow: 0 0 6px ${color};
+          line-height: 1.1;
+        ">${count}</span>`
+      : "";
 
   return L.divIcon({
     className: "custom-map-marker-icon",
     html: `<div style="
-      width: 20px;
-      height: 20px;
+      position: relative;
+      width: 22px;
+      height: 22px;
       background-color: ${color};
       border: 3px solid #080e10;
       border-radius: 50%;
-      box-shadow: 0 0 12px ${color};
-    "></div>`,
-    iconSize: [20, 20],
-    iconAnchor: [10, 10],
-    popupAnchor: [0, -12],
+      box-shadow: 0 0 14px ${color};
+    ">${badgeHtml}</div>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    popupAnchor: [0, -14],
   });
 };
 
-// Component to dynamically fit map bounds around valid report markers
-function MapBoundsController({ validReports }) {
+// Component to dynamically fit map bounds around valid issue markers
+function MapBoundsController({ validIssues }) {
   const map = useMap();
 
   useEffect(() => {
-    if (validReports && validReports.length > 0) {
-      const positions = validReports.map((r) => [
-        r.location.coordinates[1], // Latitude
-        r.location.coordinates[0], // Longitude
+    if (validIssues && validIssues.length > 0) {
+      const positions = validIssues.map((item) => [
+        item.location.coordinates[1], // Latitude
+        item.location.coordinates[0], // Longitude
       ]);
 
       if (positions.length === 1) {
@@ -45,7 +64,7 @@ function MapBoundsController({ validReports }) {
         map.fitBounds(bounds, { padding: [50, 50] });
       }
     }
-  }, [validReports, map]);
+  }, [validIssues, map]);
 
   return null;
 }
@@ -53,22 +72,44 @@ function MapBoundsController({ validReports }) {
 function Map() {
   const navigate = useNavigate();
 
-  const [reports, setReports] = useState([]);
+  const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetchReports();
+    fetchIssuesData();
   }, []);
 
-  const fetchReports = async () => {
+  const fetchIssuesData = async () => {
     setLoading(true);
     setError("");
     try {
-      const data = await getReports();
-      setReports(Array.isArray(data) ? data : []);
+      // Primary: Fetch grouped Issues
+      const data = await getIssues();
+      if (Array.isArray(data) && data.length > 0) {
+        setIssues(data);
+      } else {
+        // Fallback: If no issues found, fetch reports and construct fallback issue items
+        const rawReports = await getReports();
+        if (Array.isArray(rawReports)) {
+          const fallbackIssues = rawReports.map((r) => ({
+            _id: r._id,
+            damageType: r.damageType,
+            severity: r.severity,
+            location: r.location,
+            reports: [r],
+            reportCount: 1,
+            priorityScore: r.priorityScore || 0,
+            status: r.status || "reported",
+            createdAt: r.createdAt,
+          }));
+          setIssues(fallbackIssues);
+        } else {
+          setIssues([]);
+        }
+      }
     } catch (err) {
-      setError(err.message || "Failed to load report locations from database.");
+      setError(err.message || "Failed to load road issues from database.");
     } finally {
       setLoading(false);
     }
@@ -82,31 +123,27 @@ function Map() {
       .join(" ");
   };
 
+  const formatIssueId = (rawId) => {
+    if (!rawId) return "ISSUE-0000";
+    return `ISSUE-${rawId.slice(-6).toUpperCase()}`;
+  };
+
   const formatReportId = (rawId) => {
     if (!rawId) return "RW-0000";
     return `RW-${rawId.slice(-6).toUpperCase()}`;
   };
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return "N/A";
-    return new Date(dateStr).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  };
-
-  // Filter valid reports with proper GeoJSON coordinates [longitude, latitude]
-  const validReports = reports.filter((r) => {
-    if (!r.location || !Array.isArray(r.location.coordinates)) return false;
-    const [lng, lat] = r.location.coordinates;
+  // Filter valid issues with proper GeoJSON coordinates [longitude, latitude]
+  const validIssues = issues.filter((item) => {
+    if (!item.location || !Array.isArray(item.location.coordinates)) return false;
+    const [lng, lat] = item.location.coordinates;
     return typeof lat === "number" && typeof lng === "number" && (lat !== 0 || lng !== 0);
   });
 
-  // Default fallback map center if no reports (Lucknow / Uttar Pradesh area)
+  // Default fallback map center if no issues (Lucknow area)
   const defaultCenter =
-    validReports.length > 0
-      ? [validReports[0].location.coordinates[1], validReports[0].location.coordinates[0]]
+    validIssues.length > 0
+      ? [validIssues[0].location.coordinates[1], validIssues[0].location.coordinates[0]]
       : [26.8467, 80.9462];
 
   return (
@@ -145,7 +182,7 @@ function Map() {
         <header className="admin-header">
           <div>
             <p>ROADWISE ADMINISTRATION</p>
-            <h1>Road Damage Map</h1>
+            <h1>Grouped Road Issues Map</h1>
           </div>
 
           <div className="admin-user">
@@ -178,14 +215,14 @@ function Map() {
           <div className="admin-panel map-panel">
             <div className="map-header">
               <div>
-                <p>LIVE REPORT LOCATIONS</p>
-                <h2>Damage Overview ({validReports.length} Active)</h2>
+                <p>CLUSTERED ROAD DEFECTS</p>
+                <h2>Grouped Issues ({validIssues.length} Active)</h2>
               </div>
 
               <div className="map-legend">
                 <span>
                   <i className="legend-dot high-dot"></i>
-                  High
+                  High Severity
                 </span>
 
                 <span>
@@ -213,7 +250,7 @@ function Map() {
                     background: "#080e10",
                   }}
                 >
-                  Loading interactive map & report coordinates...
+                  Loading interactive map & grouped issue clusters...
                 </div>
               ) : (
                 <MapContainer
@@ -222,36 +259,37 @@ function Map() {
                   scrollWheelZoom={true}
                   style={{ width: "100%", height: "100%", minHeight: "480px", background: "#060c0e" }}
                 >
-                  <MapBoundsController validReports={validReports} />
+                  <MapBoundsController validIssues={validIssues} />
 
                   <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   />
 
-                  {validReports.map((report) => {
-                    const lng = report.location.coordinates[0];
-                    const lat = report.location.coordinates[1];
-                    const displayId = formatReportId(report._id);
-                    const severity = (report.severity || "low").toLowerCase();
-                    const icon = createSeverityIcon(severity);
+                  {validIssues.map((issueItem) => {
+                    const lng = issueItem.location.coordinates[0];
+                    const lat = issueItem.location.coordinates[1];
+                    const displayId = formatIssueId(issueItem._id);
+                    const severity = (issueItem.severity || "low").toLowerCase();
+                    const rCount = issueItem.reportCount || (issueItem.reports ? issueItem.reports.length : 1);
+                    const icon = createIssueMarkerIcon(severity, rCount);
 
                     return (
                       <Marker
-                        key={report._id}
+                        key={issueItem._id}
                         position={[lat, lng]}
                         icon={icon}
                       >
                         <Popup className="custom-map-popup">
-                          <div style={{ padding: "4px 2px", color: "#0b1315" }}>
-                            <div style={{ fontSize: "10px", color: "#647478", fontWeight: "700" }}>
-                              {displayId}
+                          <div style={{ padding: "6px 4px", color: "#0b1315", minWidth: "200px" }}>
+                            <div style={{ fontSize: "10px", color: "#647478", fontWeight: "700", textTransform: "uppercase" }}>
+                              ROAD ISSUE · {displayId}
                             </div>
-                            <strong style={{ fontSize: "14px", display: "block", margin: "3px 0 6px", color: "#111" }}>
-                              {formatDamageType(report.damageType)}
+                            <strong style={{ fontSize: "14px", display: "block", margin: "4px 0 2px", color: "#111" }}>
+                              {formatDamageType(issueItem.damageType)}
                             </strong>
 
-                            <div style={{ fontSize: "11px", marginBottom: "4px" }}>
+                            <div style={{ fontSize: "11px", marginBottom: "3px" }}>
                               Severity:{" "}
                               <strong
                                 style={{
@@ -267,12 +305,16 @@ function Map() {
                               </strong>
                             </div>
 
+                            <div style={{ fontSize: "11px", marginBottom: "3px", color: "#333" }}>
+                              Reports: <strong>{rCount}</strong>
+                            </div>
+
                             <div style={{ fontSize: "11px", marginBottom: "4px", color: "#333" }}>
-                              Priority Score: <strong>{report.priorityScore ?? 0}/100</strong>
+                              Status: <strong>{issueItem.status || "Open"}</strong>
                             </div>
 
                             <div style={{ fontSize: "10px", color: "#666", marginBottom: "8px" }}>
-                              Lat: {lat.toFixed(5)}, Lng: {lng.toFixed(5)}
+                              Location: {lat.toFixed(5)}, {lng.toFixed(5)}
                             </div>
 
                             <button
@@ -286,10 +328,11 @@ function Map() {
                                 cursor: "pointer",
                                 fontSize: "11px",
                                 fontWeight: "700",
+                                marginBottom: "6px",
                               }}
-                              onClick={() => navigate(`/admin/reports/${report._id}`)}
+                              onClick={() => navigate(`/admin/issues/${issueItem._id}`)}
                             >
-                              View Details →
+                              View Supporting Reports ({rCount}) →
                             </button>
 
                             <a
@@ -300,7 +343,6 @@ function Map() {
                                 display: "block",
                                 width: "100%",
                                 padding: "6px 10px",
-                                marginTop: "6px",
                                 background: "rgba(34, 211, 238, 0.12)",
                                 color: "#0891b2",
                                 border: "1px solid rgba(34, 211, 238, 0.3)",
@@ -328,7 +370,7 @@ function Map() {
             <div className="admin-panel-header">
               <div>
                 <p>LOCATIONS</p>
-                <h2>Reported Issues</h2>
+                <h2>Grouped Issues</h2>
               </div>
             </div>
 
@@ -336,34 +378,59 @@ function Map() {
               <div style={{ padding: "20px", textAlign: "center", color: "#8b9c9f", fontSize: "12px" }}>
                 Loading issues...
               </div>
-            ) : validReports.length === 0 ? (
+            ) : validIssues.length === 0 ? (
               <div style={{ padding: "20px", textAlign: "center", color: "#69777b", fontSize: "12px" }}>
-                No active report locations in database.
+                No active grouped issues in database.
               </div>
             ) : (
               <div className="map-report-list">
-                {validReports.map((report) => {
-                  const displayId = formatReportId(report._id);
-                  const severity = (report.severity || "low").toLowerCase();
-                  const address = report.location?.address || `${report.location.coordinates[1].toFixed(4)}, ${report.location.coordinates[0].toFixed(4)}`;
+                {validIssues.map((issueItem) => {
+                  const displayId = formatIssueId(issueItem._id);
+                  const severity = (issueItem.severity || "low").toLowerCase();
+                  const rCount = issueItem.reportCount || (issueItem.reports ? issueItem.reports.length : 1);
+                  const address = issueItem.location?.address || `${issueItem.location.coordinates[1].toFixed(4)}, ${issueItem.location.coordinates[0].toFixed(4)}`;
 
                   return (
-                    <button
+                    <div
                       className="map-report-item"
-                      key={report._id}
-                      onClick={() => navigate(`/admin/reports/${report._id}`)}
+                      key={issueItem._id}
+                      style={{ flexDirection: "column", alignItems: "stretch", gap: "6px", cursor: "default" }}
                     >
-                      <div>
-                        <strong>{address}</strong>
-                        <span>
-                          {displayId} · {formatDamageType(report.damageType)}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <strong style={{ fontSize: "13px" }}>{address}</strong>
+                          <span style={{ fontSize: "11px", display: "block", color: "#8b9c9f" }}>
+                            {displayId} · {formatDamageType(issueItem.damageType)}
+                          </span>
+                        </div>
+
+                        <span className={`severity ${severity}`}>
+                          {severity.toUpperCase()}
                         </span>
                       </div>
 
-                      <span className={`severity ${severity}`}>
-                        {severity.toUpperCase()}
-                      </span>
-                    </button>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "4px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                        <span style={{ fontSize: "11px", color: "#22d3ee", fontWeight: "700" }}>
+                          👥 {rCount} Report{rCount > 1 ? "s" : ""}
+                        </span>
+
+                        <button
+                          onClick={() => navigate(`/admin/issues/${issueItem._id}`)}
+                          style={{
+                            background: "rgba(34, 211, 238, 0.1)",
+                            color: "#22d3ee",
+                            border: "1px solid rgba(34, 211, 238, 0.3)",
+                            padding: "4px 10px",
+                            borderRadius: "4px",
+                            fontSize: "10px",
+                            fontWeight: "700",
+                            cursor: "pointer",
+                          }}
+                        >
+                          View Issue →
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
               </div>

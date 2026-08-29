@@ -294,6 +294,8 @@ function ReportDetails() {
                     Latitude: {typeof latitude === "number" ? latitude.toFixed(5) : "N/A"}
                     <br />
                     Longitude: {typeof longitude === "number" ? longitude.toFixed(5) : "N/A"}
+                    <br />
+                    Location accuracy: {typeof report?.locationAccuracy === "number" ? `~${Math.round(report.locationAccuracy)} m` : "Not available"}
                   </span>
                 </div>
 
