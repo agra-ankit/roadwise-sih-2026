@@ -1,3 +1,11 @@
+const dns = require("dns");
+// Fix for Windows / ISP DNS SRV resolution issues with mongodb+srv://
+try {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+} catch (e) {
+  // Fallback gracefully if setServers is not supported in current environment
+}
+
 const mongoose = require("mongoose");
 const Issue = require("../models/issue.model");
 
