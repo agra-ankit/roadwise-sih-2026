@@ -65,8 +65,58 @@ const reportSchema = new mongoose.Schema(
       ref: 'User',
       default: null
     },
+    assignedTeam: {
+      type: String,
+      default: null,
+      trim: true
+    },
+    targetDeadline: {
+      type: Date,
+      default: null
+    },
+    slaHours: {
+      type: Number,
+      default: 24
+    },
+    assignmentNotes: {
+      type: String,
+      default: null,
+      trim: true
+    },
+    completionImageUrl: {
+      type: String,
+      default: null,
+      trim: true
+    },
+    contextTags: {
+      type: [String],
+      default: []
+    },
+    contextBoost: {
+      type: Number,
+      default: 0
+    },
     description: {
       type: String,
+      trim: true
+    },
+
+    // Citizen Cross-Device Identifier (Phone, Email, or Device Token)
+    citizenId: {
+      type: String,
+      default: null,
+      index: true,
+      trim: true
+    },
+    citizenContact: {
+      type: String,
+      default: null,
+      index: true,
+      trim: true
+    },
+    citizenName: {
+      type: String,
+      default: null,
       trim: true
     }
   },
@@ -75,7 +125,7 @@ const reportSchema = new mongoose.Schema(
   }
 );
 
-// REFINED: Add a spatial index to make map searches lightning fast
+// REFINED: Add spatial index for fast geospatial queries
 reportSchema.index({ location: '2dsphere' });
 
 const Report = mongoose.model('Report', reportSchema);

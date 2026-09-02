@@ -62,6 +62,28 @@ const issueSchema = new mongoose.Schema(
       type: Number,
       default: 0
     },
+    completionImageUrl: {
+      type: String,
+      default: null,
+      trim: true
+    },
+    contextTags: {
+      type: [String],
+      default: []
+    },
+    assignedTeam: {
+      type: String,
+      default: null,
+      trim: true
+    },
+    targetDeadline: {
+      type: Date,
+      default: null
+    },
+    slaHours: {
+      type: Number,
+      default: 24
+    },
     status: {
       type: String,
       enum: ["reported", "verified", "assigned", "in_progress", "completed", "rejected"],

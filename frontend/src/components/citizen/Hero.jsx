@@ -1,4 +1,31 @@
+import { useState, useEffect } from "react";
+import { getReports } from "../../services/api";
+
 function Hero() {
+  const [reportCount, setReportCount] = useState(0);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchCount = async () => {
+      try {
+        const reports = await getReports();
+        if (isMounted && Array.isArray(reports)) {
+          setReportCount(reports.length);
+        }
+      } catch {
+        // Fallback gracefully
+      }
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 15000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const citizenCount = (1200 + reportCount).toLocaleString();
+
   const scrollToReport = () => {
     document.getElementById("report")?.scrollIntoView({ behavior: "smooth" });
   };
@@ -50,7 +77,7 @@ function Hero() {
           </div>
 
           <div>
-            <strong>1,200+ citizens</strong>
+            <strong>{citizenCount}+ citizens</strong>
             <p>already making roads better</p>
           </div>
         </div>

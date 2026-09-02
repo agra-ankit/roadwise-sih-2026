@@ -1,17 +1,112 @@
-import { useState, useEffect, useRef } from "react";
-import { createReport } from "../../services/api";
+import { useState, useRef } from "react";
+import { createReport, SERVER_BASE_URL } from "../../services/api";
+import LocationPicker from "./LocationPicker";
 
-const SERVER_BASE = "http://localhost:5000";
+const SERVER_BASE = SERVER_BASE_URL;
+
+// Contextual Road Domain Speech Sanitizer
+function sanitizeRoadSpeech(text) {
+  if (!text) return "";
+  let clean = text.trim();
+
+  // Auto-correct common speech engine mishearings in Indian English / Hinglish
+  clean = clean.replace(/\b(deep\s+)?(bethel|battle|path\s*hole|port\s*hole|pot\s+hole|pot\s*hol)\b/gi, "deep pothole");
+  clean = clean.replace(/\b(bethel|battle|path\s*hole|port\s*hole|pot\s+hole|pot\s*hol)\b/gi, "pothole");
+  clean = clean.replace(/\b(main\s*hole|men\s*hole|man\s*hall|men\s*hall)\b/gi, "manhole");
+  clean = clean.replace(/\b(open\s+)?(main\s*hole|men\s*hole)\b/gi, "open manhole");
+  clean = clean.replace(/\b(water\s+logging|water\s+log|water\s*lock)\b/gi, "waterlogging");
+  clean = clean.replace(/\b(street\s*light|street\s*lite)\b/gi, "street light");
+
+  return clean;
+}
 
 function ReportForm() {
   const [image, setImage] = useState(null);
   const [preview, setPreview] = useState("");
   const [description, setDescription] = useState("");
+  const baseDescriptionRef = useRef("");
+  const [citizenContact, setCitizenContact] = useState(() => {
+    return localStorage.getItem("roadwise_citizen_contact") || "";
+  });
+  const [citizenName, setCitizenName] = useState(() => {
+    return localStorage.getItem("roadwise_citizen_name") || "";
+  });
   const [location, setLocation] = useState(null);
+  const [address, setAddress] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [reportResult, setReportResult] = useState(null);
+
+  // Multilingual Speech-to-Text State
+  const [isListening, setIsListening] = useState(false);
+  const [speechLang, setSpeechLang] = useState("en-IN");
+  const [speechSupported] = useState(() => {
+    return typeof window !== "undefined" && ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+  });
+  const [speechStatus, setSpeechStatus] = useState("");
+
+  const handleToggleListening = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setSpeechStatus("Speech recognition is not supported on this browser.");
+      return;
+    }
+
+    if (isListening) {
+      if (window._roadwiseSpeechRec) {
+        window._roadwiseSpeechRec.stop();
+      }
+      setIsListening(false);
+      setSpeechStatus("");
+      return;
+    }
+
+    try {
+      baseDescriptionRef.current = description;
+      const recognition = new SpeechRecognition();
+      recognition.lang = speechLang;
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setSpeechStatus(speechLang === "hi-IN" ? "🎙️ सुन रहा हूँ... बोलिए" : "🎙️ Listening... Speak clearly");
+      };
+
+      recognition.onresult = (event) => {
+        let rawTranscript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal || event.results[i][0]) {
+            rawTranscript += event.results[i][0].transcript;
+          }
+        }
+
+        const cleanTranscript = sanitizeRoadSpeech(rawTranscript);
+        if (cleanTranscript) {
+          setDescription(cleanTranscript);
+          setSpeechStatus(`✓ Transcribed: "${cleanTranscript}"`);
+        }
+      };
+
+      recognition.onerror = (event) => {
+        setIsListening(false);
+        setSpeechStatus(event.error === "no-speech" ? "No speech detected. Try again." : `Mic: ${event.error}`);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      window._roadwiseSpeechRec = recognition;
+      recognition.start();
+    } catch (err) {
+      console.error("Speech error:", err);
+      setIsListening(false);
+      setSpeechStatus("Unable to access microphone.");
+    }
+  };
 
   const handleImageChange = (event) => {
     const file = event.target.files[0];
@@ -30,124 +125,6 @@ function ReportForm() {
     setPreview(imageUrl);
   };
 
-  const [locating, setLocating] = useState(false);
-  const [gpsStatus, setGpsStatus] = useState("");
-  const [bestAccuracy, setBestAccuracy] = useState(null);
-
-  const watchIdRef = useRef(null);
-  const timeoutIdRef = useRef(null);
-
-  const stopGpsWatch = () => {
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
-    if (timeoutIdRef.current !== null) {
-      clearTimeout(timeoutIdRef.current);
-      timeoutIdRef.current = null;
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      stopGpsWatch();
-    };
-  }, []);
-
-  const getLocation = () => {
-    setError("");
-    stopGpsWatch();
-
-    if (!navigator.geolocation) {
-      setError("Location is not supported by your browser.");
-      return;
-    }
-
-    setLocating(true);
-    setGpsStatus("Finding your precise location...");
-    setBestAccuracy(null);
-
-    let readings = [];
-    let currentBest = null;
-
-    const finalizeLocation = (bestReading) => {
-      stopGpsWatch();
-      setLocating(false);
-
-      if (bestReading) {
-        setLocation({
-          latitude: bestReading.latitude,
-          longitude: bestReading.longitude,
-          accuracy: bestReading.accuracy,
-        });
-
-        if (bestReading.accuracy > 30) {
-          setGpsStatus(`Low GPS accuracy (~${Math.round(bestReading.accuracy)}m). Outdoor view recommended.`);
-        } else {
-          setGpsStatus(`✓ High-accuracy location found (±${Math.round(bestReading.accuracy)}m)`);
-        }
-      } else {
-        setError("Unable to acquire location reading. Please try again.");
-      }
-    };
-
-    // 10-second acquisition timeout safeguard
-    timeoutIdRef.current = setTimeout(() => {
-      finalizeLocation(currentBest);
-    }, 10000);
-
-    try {
-      const watchId = navigator.geolocation.watchPosition(
-        (position) => {
-          const reading = {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-          };
-
-          readings.push(reading);
-
-          if (!currentBest || reading.accuracy < currentBest.accuracy) {
-            currentBest = reading;
-            setBestAccuracy(Math.round(reading.accuracy));
-            setGpsStatus(`Improving location... Best accuracy: ±${Math.round(reading.accuracy)}m`);
-          }
-
-          // Early success: accuracy <= 12m or 5 valid readings collected
-          if (reading.accuracy <= 12 || readings.length >= 5) {
-            finalizeLocation(currentBest);
-          }
-        },
-        (err) => {
-          stopGpsWatch();
-          setLocating(false);
-          if (err.code === err.PERMISSION_DENIED) {
-            setError("Location permission denied. Please allow location access in your browser.");
-          } else if (err.code === err.TIMEOUT) {
-            if (currentBest) {
-              finalizeLocation(currentBest);
-            } else {
-              setError("GPS location request timed out. Please try again or check location settings.");
-            }
-          } else {
-            setError("Unable to determine your location. Please try again.");
-          }
-        },
-        {
-          enableHighAccuracy: true,
-          maximumAge: 0,
-          timeout: 10000,
-        }
-      );
-
-      watchIdRef.current = watchId;
-    } catch (e) {
-      stopGpsWatch();
-      setLocating(false);
-      setError("Failed to initiate GPS location acquisition.");
-    }
-  };
-
   const handleSubmit = async (event) => {
     event.preventDefault();
 
@@ -159,7 +136,7 @@ function ReportForm() {
     }
 
     if (!location) {
-      setError("Please share your location.");
+      setError("Please search or select the location on the map.");
       return;
     }
 
@@ -167,13 +144,32 @@ function ReportForm() {
     setLoading(true);
 
     try {
+      let citizenId = localStorage.getItem("roadwise_citizen_id");
+      if (!citizenId) {
+        citizenId = `CIT-${Math.random().toString(36).slice(2, 9).toUpperCase()}`;
+        localStorage.setItem("roadwise_citizen_id", citizenId);
+      }
+
       const formData = new FormData();
       formData.append("image", image);
       formData.append("latitude", String(location.latitude));
       formData.append("longitude", String(location.longitude));
+      formData.append("citizenId", citizenId);
+
+      if (citizenContact && citizenContact.trim()) {
+        formData.append("citizenContact", citizenContact.trim());
+      }
+
+      if (citizenName && citizenName.trim()) {
+        formData.append("citizenName", citizenName.trim());
+      }
 
       if (typeof location.accuracy === "number") {
         formData.append("locationAccuracy", String(location.accuracy));
+      }
+
+      if (address && address.trim()) {
+        formData.append("address", address.trim());
       }
 
       if (description && description.trim()) {
@@ -183,6 +179,12 @@ function ReportForm() {
       const response = await createReport(formData);
       setReportResult(response);
       setSubmitted(true);
+
+      const currentCount = parseInt(
+        localStorage.getItem("roadwise_user_report_count") || "0",
+        10
+      );
+      localStorage.setItem("roadwise_user_report_count", String(currentCount + 1));
     } catch (err) {
       setError(
         err.message ||
@@ -225,26 +227,43 @@ function ReportForm() {
     const statusText = report.status
       ? report.status.charAt(0).toUpperCase() + report.status.slice(1)
       : "Reported";
-    const reportId =
-      report._id || `RW-${Math.floor(Math.random() * 90000 + 10000)}`;
+    const isRejected = reportResult?.isRejected === true || report.status === "rejected";
+    const reportId = report._id
+      ? report._id.slice(-6).toUpperCase()
+      : "SUBMITTED";
     const displayImg = getImageUrl(report.imageUrl);
 
     return (
       <section className="report-section" id="report">
         <div className="success-card">
-          <div className="success-icon">✓</div>
+          <div className="success-icon" style={{ background: isRejected ? "rgba(239, 68, 68, 0.15)" : undefined, color: isRejected ? "#ff4d4d" : undefined, border: isRejected ? "1px solid rgba(239, 68, 68, 0.3)" : undefined }}>
+            {isRejected ? "⚠️" : "✓"}
+          </div>
 
-          <div className="success-label">REPORT RECEIVED & AI ANALYZED</div>
+          <div className="success-label" style={{ color: isRejected ? "#ffaa00" : undefined }}>
+            {isRejected ? "AI VALIDATION · NO ROAD HAZARD FOUND" : "REPORT RECEIVED & AI ANALYZED"}
+          </div>
 
           <h2>
-            Thank you for
-            <br />
-            <span>making roads safer.</span>
+            {isRejected ? (
+              <>
+                No Road Hazard
+                <br />
+                <span style={{ color: "#ffaa00" }}>Detected in Image.</span>
+              </>
+            ) : (
+              <>
+                Thank you for
+                <br />
+                <span>making roads safer.</span>
+              </>
+            )}
           </h2>
 
           <p>
-            Your road damage report has been analyzed by AI and stored
-            securely in the database.
+            {isRejected
+              ? "Our AI vision analyzed this photo and found 0 potholes or open manholes (Confidence: 0%). This report is flagged as unverified to prevent false dispatches."
+              : "Your road damage report has been analyzed by AI and stored securely in the database."}
           </p>
 
           <div className="success-id">
@@ -258,8 +277,8 @@ function ReportForm() {
               margin: "24px 0",
               padding: "20px",
               borderRadius: "14px",
-              background: "rgba(34, 211, 238, 0.04)",
-              border: "1px solid rgba(34, 211, 238, 0.2)",
+              background: isRejected ? "rgba(239, 68, 68, 0.04)" : "rgba(34, 211, 238, 0.04)",
+              border: isRejected ? "1px solid rgba(239, 68, 68, 0.25)" : "1px solid rgba(34, 211, 238, 0.2)",
               textAlign: "left",
             }}
           >
@@ -281,7 +300,7 @@ function ReportForm() {
                     height: "85px",
                     objectFit: "cover",
                     borderRadius: "10px",
-                    border: "1px solid rgba(34, 211, 238, 0.3)",
+                    border: isRejected ? "1px solid rgba(239, 68, 68, 0.3)" : "1px solid rgba(34, 211, 238, 0.3)",
                   }}
                 />
               )}
@@ -289,16 +308,16 @@ function ReportForm() {
                 <div
                   style={{
                     fontSize: "10px",
-                    color: "#22d3ee",
+                    color: isRejected ? "#ffaa00" : "#22d3ee",
                     fontWeight: "700",
                     letterSpacing: "1px",
                     marginBottom: "4px",
                   }}
                 >
-                  AI DETECTED ISSUE
+                  {isRejected ? "AI VALIDATION STATUS" : "AI DETECTED ISSUE"}
                 </div>
-                <h4 style={{ margin: 0, fontSize: "18px", color: "#f0f6f8" }}>
-                  {damageText}
+                <h4 style={{ margin: 0, fontSize: "18px", color: isRejected ? "#ff9b9b" : "#f0f6f8" }}>
+                  {isRejected ? "No Hazard / Unverified" : damageText}
                 </h4>
                 <div
                   style={{
@@ -308,8 +327,8 @@ function ReportForm() {
                   }}
                 >
                   Status:{" "}
-                  <span style={{ color: "#22d3ee", fontWeight: "600" }}>
-                    {statusText}
+                  <span style={{ color: isRejected ? "#ff4d4d" : "#22d3ee", fontWeight: "700" }}>
+                    {isRejected ? "Rejected (No Defect)" : statusText}
                   </span>
                 </div>
               </div>
@@ -382,6 +401,27 @@ function ReportForm() {
                 </strong>
               </div>
             </div>
+
+            {report.contextTags && report.contextTags.length > 0 && (
+              <div style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px solid rgba(255, 255, 255, 0.08)", display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                {report.contextTags.map((tag) => (
+                  <span
+                    key={tag}
+                    style={{
+                      background: "rgba(234, 179, 8, 0.12)",
+                      color: "#facc15",
+                      border: "1px solid rgba(234, 179, 8, 0.3)",
+                      padding: "3px 8px",
+                      borderRadius: "5px",
+                      fontSize: "10px",
+                      fontWeight: "700",
+                    }}
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {location &&
@@ -519,60 +559,93 @@ function ReportForm() {
 
           <div className="form-group">
             <label>
-              Location
+              Road Hazard Location
               <span>Required</span>
             </label>
 
-            <button
-              type="button"
-              className={`location-button ${
-                location ? "location-success" : ""
-              }`}
-              onClick={getLocation}
-              disabled={locating}
-            >
-              <span className="location-button-icon">
-                {locating ? "⏳" : location ? "✓" : "⌖"}
-              </span>
-
-              <div>
-                <strong>
-                  {locating
-                    ? "Capturing GPS location..."
-                    : location
-                    ? "Location captured"
-                    : "Use my current location"}
-                </strong>
-
-                <small>
-                  {locating
-                    ? "Requesting high-accuracy positioning..."
-                    : location
-                    ? `${location.latitude.toFixed(
-                        5,
-                      )}, ${location.longitude.toFixed(5)}${
-                        typeof location.accuracy === "number"
-                          ? ` (±${Math.round(location.accuracy)}m)`
-                          : ""
-                      }`
-                    : "We only use this to locate the issue"}
-                </small>
-              </div>
-
-              {!location && !locating && <span className="button-arrow">→</span>}
-            </button>
+            <LocationPicker
+              location={location}
+              onChangeLocation={setLocation}
+              address={address}
+              onChangeAddress={setAddress}
+              setError={setError}
+            />
           </div>
 
-          {/* DESCRIPTION */}
+          {/* DESCRIPTION & MULTILINGUAL VOICE INPUT */}
 
           <div className="form-group">
-            <label>
-              Description
-              <span>Optional</span>
-            </label>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px", flexWrap: "wrap", gap: "6px" }}>
+              <label style={{ margin: 0 }}>
+                Description
+                <span style={{ marginLeft: "6px" }}>Optional</span>
+              </label>
+
+              {/* Voice-to-Text Bar */}
+              {speechSupported && (
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  {/* Language Selector */}
+                  <select
+                    value={speechLang}
+                    onChange={(e) => setSpeechLang(e.target.value)}
+                    style={{
+                      padding: "3px 8px",
+                      borderRadius: "6px",
+                      background: "rgba(10, 18, 22, 0.9)",
+                      border: "1px solid rgba(34, 211, 238, 0.25)",
+                      color: "#22d3ee",
+                      fontSize: "10px",
+                      fontWeight: "700",
+                      outline: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <option value="en-IN">🌐 English (India)</option>
+                    <option value="hi-IN">🇮🇳 हिन्दी (Hindi)</option>
+                  </select>
+
+                  {/* Mic Trigger Button */}
+                  <button
+                    type="button"
+                    onClick={handleToggleListening}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      padding: "4px 10px",
+                      borderRadius: "6px",
+                      background: isListening ? "rgba(255, 77, 77, 0.2)" : "rgba(34, 211, 238, 0.12)",
+                      border: `1px solid ${isListening ? "#ff4d4d" : "rgba(34, 211, 238, 0.35)"}`,
+                      color: isListening ? "#ff6b6b" : "#22d3ee",
+                      fontSize: "11px",
+                      fontWeight: "800",
+                      cursor: "pointer",
+                      transition: "all 0.2s ease",
+                      animation: isListening ? "pulse 1.2s infinite" : "none",
+                    }}
+                  >
+                    <span>{isListening ? "🔴" : "🎙️"}</span>
+                    <span>{isListening ? "Stop Listening" : "Speak to Dictate"}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {speechStatus && (
+              <div
+                style={{
+                  fontSize: "11px",
+                  color: isListening ? "#22d3ee" : speechStatus.startsWith("✓") ? "#10b981" : "#ff9b9b",
+                  marginBottom: "6px",
+                  fontWeight: "600",
+                }}
+              >
+                {speechStatus}
+              </div>
+            )}
 
             <textarea
-              placeholder="Anything authorities should know? For example: traffic is affected, near school, very deep pothole..."
+              placeholder="Anything authorities should know? Or click 'Speak to Dictate' to speak in Hindi or English..."
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               rows="4"
@@ -580,6 +653,81 @@ function ReportForm() {
             />
 
             <div className="character-count">{description.length}/500</div>
+          </div>
+
+          {/* CITIZEN REWARD & SYNC INFO */}
+          <div
+            style={{
+              background: "rgba(34, 211, 238, 0.04)",
+              border: "1px dashed rgba(34, 211, 238, 0.25)",
+              borderRadius: "12px",
+              padding: "14px",
+              marginBottom: "18px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "8px" }}>
+              <span style={{ fontSize: "14px" }}>🏆</span>
+              <span style={{ fontSize: "11px", fontWeight: "800", color: "#22d3ee", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                Civic Karma & Certificate Sync (Optional)
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <div>
+                <label style={{ fontSize: "10px", color: "#8b9c9f", display: "block", marginBottom: "4px" }}>
+                  Your Full Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Ankit Kumar"
+                  value={citizenName}
+                  onChange={(e) => {
+                    setCitizenName(e.target.value);
+                    localStorage.setItem("roadwise_citizen_name", e.target.value);
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    background: "rgba(10, 18, 22, 0.8)",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    color: "#f0f6f8",
+                    fontSize: "12px",
+                    boxSizing: "border-box",
+                    outline: "none",
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: "10px", color: "#8b9c9f", display: "block", marginBottom: "4px" }}>
+                  Mobile Number / Email
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 9876543210"
+                  value={citizenContact}
+                  onChange={(e) => {
+                    setCitizenContact(e.target.value);
+                    localStorage.setItem("roadwise_citizen_contact", e.target.value);
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    background: "rgba(10, 18, 22, 0.8)",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    color: "#f0f6f8",
+                    fontSize: "12px",
+                    boxSizing: "border-box",
+                    outline: "none",
+                  }}
+                />
+              </div>
+            </div>
+            <div style={{ fontSize: "10px", color: "#647478", marginTop: "6px" }}>
+              Syncs your karma points and printable municipal certificate across all your devices.
+            </div>
           </div>
 
           {error && <div className="form-error">⚠ {error}</div>}

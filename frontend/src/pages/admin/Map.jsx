@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Circle, CircleMarker, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { getIssues, getReports } from "../../services/api";
+import { getIssues, getReports, logoutAdmin } from "../../services/api";
 
 // Custom glowing DivIcon for Issues with optional report count badge
 const createIssueMarkerIcon = (severity, reportCount) => {
@@ -75,45 +75,58 @@ function Map() {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [mapMode, setMapMode] = useState("clusters"); // "clusters" or "heatmap"
 
   useEffect(() => {
-    fetchIssuesData();
-  }, []);
+    let isMounted = true;
 
-  const fetchIssuesData = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      // Primary: Fetch grouped Issues
-      const data = await getIssues();
-      if (Array.isArray(data) && data.length > 0) {
-        setIssues(data);
-      } else {
-        // Fallback: If no issues found, fetch reports and construct fallback issue items
-        const rawReports = await getReports();
-        if (Array.isArray(rawReports)) {
-          const fallbackIssues = rawReports.map((r) => ({
-            _id: r._id,
-            damageType: r.damageType,
-            severity: r.severity,
-            location: r.location,
-            reports: [r],
-            reportCount: 1,
-            priorityScore: r.priorityScore || 0,
-            status: r.status || "reported",
-            createdAt: r.createdAt,
-          }));
-          setIssues(fallbackIssues);
-        } else {
-          setIssues([]);
+    const loadIssuesData = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        // Primary: Fetch grouped Issues
+        const data = await getIssues();
+        if (isMounted) {
+          if (Array.isArray(data) && data.length > 0) {
+            setIssues(data);
+          } else {
+            // Fallback: If no issues found, fetch reports and construct fallback issue items
+            const rawReports = await getReports();
+            if (Array.isArray(rawReports)) {
+              const fallbackIssues = rawReports.map((r) => ({
+                _id: r._id,
+                damageType: r.damageType,
+                severity: r.severity,
+                location: r.location,
+                reports: [r],
+                reportCount: 1,
+                priorityScore: r.priorityScore || 0,
+                status: r.status || "reported",
+                createdAt: r.createdAt,
+              }));
+              setIssues(fallbackIssues);
+            } else {
+              setIssues([]);
+            }
+          }
+        }
+      } catch (err) {
+        if (isMounted) {
+          setError(err.message || "Failed to load road issues from database.");
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
         }
       }
-    } catch (err) {
-      setError(err.message || "Failed to load road issues from database.");
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+
+    loadIssuesData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const formatDamageType = (type) => {
     if (!type) return "Other Damage";
@@ -126,11 +139,6 @@ function Map() {
   const formatIssueId = (rawId) => {
     if (!rawId) return "ISSUE-0000";
     return `ISSUE-${rawId.slice(-6).toUpperCase()}`;
-  };
-
-  const formatReportId = (rawId) => {
-    if (!rawId) return "RW-0000";
-    return `RW-${rawId.slice(-6).toUpperCase()}`;
   };
 
   // Filter valid issues with proper GeoJSON coordinates [longitude, latitude]
@@ -172,7 +180,10 @@ function Map() {
 
         <button
           className="admin-logout"
-          onClick={() => navigate("/admin/login")}
+          onClick={() => {
+            logoutAdmin();
+            navigate("/admin/login");
+          }}
         >
           Sign out
         </button>
@@ -219,21 +230,58 @@ function Map() {
                 <h2>Grouped Issues ({validIssues.length} Active)</h2>
               </div>
 
-              <div className="map-legend">
-                <span>
-                  <i className="legend-dot high-dot"></i>
-                  High Severity
-                </span>
+              <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: "6px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setMapMode("clusters")}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid rgba(34, 211, 238, 0.3)",
+                      background: mapMode === "clusters" ? "rgba(34, 211, 238, 0.25)" : "transparent",
+                      color: mapMode === "clusters" ? "#22d3ee" : "#8b9c9f",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                    }}
+                  >
+                    📌 Clustered Markers
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMapMode("heatmap")}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid rgba(255, 77, 77, 0.3)",
+                      background: mapMode === "heatmap" ? "rgba(255, 77, 77, 0.25)" : "transparent",
+                      color: mapMode === "heatmap" ? "#ff6b6b" : "#8b9c9f",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                    }}
+                  >
+                    🔥 Hazard Density Heatmap
+                  </button>
+                </div>
 
-                <span>
-                  <i className="legend-dot medium-dot"></i>
-                  Medium
-                </span>
+                <div className="map-legend">
+                  <span>
+                    <i className="legend-dot high-dot"></i>
+                    High Severity
+                  </span>
 
-                <span>
-                  <i className="legend-dot low-dot"></i>
-                  Low
-                </span>
+                  <span>
+                    <i className="legend-dot medium-dot"></i>
+                    Medium
+                  </span>
+
+                  <span>
+                    <i className="legend-dot low-dot"></i>
+                    Low
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -266,101 +314,156 @@ function Map() {
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   />
 
-                  {validIssues.map((issueItem) => {
-                    const lng = issueItem.location.coordinates[0];
-                    const lat = issueItem.location.coordinates[1];
-                    const displayId = formatIssueId(issueItem._id);
-                    const severity = (issueItem.severity || "low").toLowerCase();
-                    const rCount = issueItem.reportCount || (issueItem.reports ? issueItem.reports.length : 1);
-                    const icon = createIssueMarkerIcon(severity, rCount);
+                  {mapMode === "heatmap"
+                    ? validIssues.map((issueItem) => {
+                        const lng = issueItem.location.coordinates[0];
+                        const lat = issueItem.location.coordinates[1];
+                        const severity = (issueItem.severity || "low").toLowerCase();
+                        const priority = issueItem.priorityScore || 50;
+                        const rCount = issueItem.reportCount || 1;
 
-                    return (
-                      <Marker
-                        key={issueItem._id}
-                        position={[lat, lng]}
-                        icon={icon}
-                      >
-                        <Popup className="custom-map-popup">
-                          <div style={{ padding: "6px 4px", color: "#0b1315", minWidth: "200px" }}>
-                            <div style={{ fontSize: "10px", color: "#647478", fontWeight: "700", textTransform: "uppercase" }}>
-                              ROAD ISSUE · {displayId}
-                            </div>
-                            <strong style={{ fontSize: "14px", display: "block", margin: "4px 0 2px", color: "#111" }}>
-                              {formatDamageType(issueItem.damageType)}
-                            </strong>
+                        const heatColor =
+                          severity === "high"
+                            ? "#ef4444"
+                            : severity === "medium"
+                            ? "#f59e0b"
+                            : "#06b6d4";
 
-                            <div style={{ fontSize: "11px", marginBottom: "3px" }}>
-                              Severity:{" "}
-                              <strong
-                                style={{
-                                  color:
-                                    severity === "high"
-                                      ? "#d93838"
-                                      : severity === "medium"
-                                      ? "#d98200"
-                                      : "#0288d1",
-                                }}
-                              >
-                                {severity.toUpperCase()}
-                              </strong>
-                            </div>
+                        const radiusMeters = 40 + Math.min(80, rCount * 15 + priority * 0.4);
 
-                            <div style={{ fontSize: "11px", marginBottom: "3px", color: "#333" }}>
-                              Reports: <strong>{rCount}</strong>
-                            </div>
-
-                            <div style={{ fontSize: "11px", marginBottom: "4px", color: "#333" }}>
-                              Status: <strong>{issueItem.status || "Open"}</strong>
-                            </div>
-
-                            <div style={{ fontSize: "10px", color: "#666", marginBottom: "8px" }}>
-                              Location: {lat.toFixed(5)}, {lng.toFixed(5)}
-                            </div>
-
-                            <button
-                              style={{
-                                width: "100%",
-                                padding: "6px 10px",
-                                background: "#0b1315",
-                                color: "#22d3ee",
-                                border: 0,
-                                borderRadius: "6px",
-                                cursor: "pointer",
-                                fontSize: "11px",
-                                fontWeight: "700",
-                                marginBottom: "6px",
+                        return (
+                          <div key={`heat-${issueItem._id}`}>
+                            <Circle
+                              center={[lat, lng]}
+                              radius={radiusMeters}
+                              pathOptions={{
+                                fillColor: heatColor,
+                                fillOpacity: 0.35,
+                                color: heatColor,
+                                opacity: 0.8,
+                                weight: 2,
                               }}
-                              onClick={() => navigate(`/admin/issues/${issueItem._id}`)}
-                            >
-                              View Supporting Reports ({rCount}) →
-                            </button>
-
-                            <a
-                              href={`https://www.google.com/maps?q=${lat},${lng}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              style={{
-                                display: "block",
-                                width: "100%",
-                                padding: "6px 10px",
-                                background: "rgba(34, 211, 238, 0.12)",
-                                color: "#0891b2",
-                                border: "1px solid rgba(34, 211, 238, 0.3)",
-                                borderRadius: "6px",
-                                textDecoration: "none",
-                                textAlign: "center",
-                                fontSize: "11px",
-                                fontWeight: "700",
-                                boxSizing: "border-box",
+                            />
+                            <CircleMarker
+                              center={[lat, lng]}
+                              radius={8}
+                              pathOptions={{
+                                fillColor: "#ffffff",
+                                fillOpacity: 0.9,
+                                color: heatColor,
+                                weight: 3,
                               }}
                             >
-                              📍 Open in Google Maps ↗
-                            </a>
+                              <Popup className="custom-map-popup">
+                                <div style={{ padding: "4px", color: "#111" }}>
+                                  <strong>🔥 Hazard Hotspot</strong>
+                                  <div style={{ fontSize: "12px", marginTop: "2px" }}>
+                                    {formatDamageType(issueItem.damageType)} · {severity.toUpperCase()}
+                                  </div>
+                                  <div style={{ fontSize: "11px", color: "#666" }}>
+                                    Reports Clustered: {rCount} · Priority: {priority}/100
+                                  </div>
+                                </div>
+                              </Popup>
+                            </CircleMarker>
                           </div>
-                        </Popup>
-                      </Marker>
-                    );
-                  })}
+                        );
+                      })
+                    : validIssues.map((issueItem) => {
+                        const lng = issueItem.location.coordinates[0];
+                        const lat = issueItem.location.coordinates[1];
+                        const displayId = formatIssueId(issueItem._id);
+                        const severity = (issueItem.severity || "low").toLowerCase();
+                        const rCount = issueItem.reportCount || (issueItem.reports ? issueItem.reports.length : 1);
+                        const icon = createIssueMarkerIcon(severity, rCount);
+
+                        return (
+                          <Marker
+                            key={issueItem._id}
+                            position={[lat, lng]}
+                            icon={icon}
+                          >
+                            <Popup className="custom-map-popup">
+                              <div style={{ padding: "6px 4px", color: "#0b1315", minWidth: "200px" }}>
+                                <div style={{ fontSize: "10px", color: "#647478", fontWeight: "700", textTransform: "uppercase" }}>
+                                  ROAD ISSUE · {displayId}
+                                </div>
+                                <strong style={{ fontSize: "14px", display: "block", margin: "4px 0 2px", color: "#111" }}>
+                                  {formatDamageType(issueItem.damageType)}
+                                </strong>
+
+                                <div style={{ fontSize: "11px", marginBottom: "3px" }}>
+                                  Severity:{" "}
+                                  <strong
+                                    style={{
+                                      color:
+                                        severity === "high"
+                                          ? "#d93838"
+                                          : severity === "medium"
+                                          ? "#d98200"
+                                          : "#0288d1",
+                                    }}
+                                  >
+                                    {severity.toUpperCase()}
+                                  </strong>
+                                </div>
+
+                                <div style={{ fontSize: "11px", marginBottom: "3px", color: "#333" }}>
+                                  Reports: <strong>{rCount}</strong>
+                                </div>
+
+                                <div style={{ fontSize: "11px", marginBottom: "4px", color: "#333" }}>
+                                  Status: <strong>{issueItem.status || "Open"}</strong>
+                                </div>
+
+                                <div style={{ fontSize: "10px", color: "#666", marginBottom: "8px" }}>
+                                  Location: {lat.toFixed(5)}, {lng.toFixed(5)}
+                                </div>
+
+                                <button
+                                  style={{
+                                    width: "100%",
+                                    padding: "6px 10px",
+                                    background: "#0b1315",
+                                    color: "#22d3ee",
+                                    border: 0,
+                                    borderRadius: "6px",
+                                    cursor: "pointer",
+                                    fontSize: "11px",
+                                    fontWeight: "700",
+                                    marginBottom: "6px",
+                                  }}
+                                  onClick={() => navigate(`/admin/issues/${issueItem._id}`)}
+                                >
+                                  View Supporting Reports ({rCount}) →
+                                </button>
+
+                                <a
+                                  href={`https://www.google.com/maps?q=${lat},${lng}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    display: "block",
+                                    width: "100%",
+                                    padding: "6px 10px",
+                                    background: "rgba(34, 211, 238, 0.12)",
+                                    color: "#0891b2",
+                                    border: "1px solid rgba(34, 211, 238, 0.3)",
+                                    borderRadius: "6px",
+                                    textDecoration: "none",
+                                    textAlign: "center",
+                                    fontSize: "11px",
+                                    fontWeight: "700",
+                                    boxSizing: "border-box",
+                                  }}
+                                >
+                                  📍 Open in Google Maps ↗
+                                </a>
+                              </div>
+                            </Popup>
+                          </Marker>
+                        );
+                      })}
                 </MapContainer>
               )}
             </div>
